@@ -1,7 +1,7 @@
 _storage/
 archive/
 code_backup/
-datasets/
+datasets_offline/
 saved_logs/
 venv/
 .idea/
@@ -14,3 +14,5 @@ fmnist_config.py
 imdb_config.py
 run.py
 PlotEngine.py
+NLPhelper.py
+DataHandling.py
