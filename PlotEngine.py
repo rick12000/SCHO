@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from SCHO.utils.DataHandling import Filing
+from DataHandling import Filing
 
 
 class PlotHelper:

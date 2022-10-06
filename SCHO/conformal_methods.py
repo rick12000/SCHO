@@ -3,7 +3,8 @@ import random
 
 import numpy as np
 import pandas as pd
-from SCHO.utils.RunEfficiency import TimeLogger
+from SCHO.utils.runtime_eval import TimeLogger
+
 from sklearn import metrics
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor

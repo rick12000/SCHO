@@ -15,14 +15,10 @@ import numpy as np
 
 random.seed(1234)
 np.random.seed(1234)
-import tensorflow as tf
-from sklearn import datasets as sklearn_datasets
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.neural_network import MLPClassifier
-from tensorflow.keras import datasets as keras_datasets
-from tensorflow.keras import layers, models
-import tensorflow_datasets as tfds
+import tensorflow as tf
 
 session_conf = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=1)
 sess = tf.compat.v1.Session(graph=tf.compat.v1.get_default_graph(), config=session_conf)
@@ -31,222 +27,23 @@ tf.compat.v1.keras.backend.set_session(sess)
 warnings.filterwarnings("ignore")
 from sklearn.preprocessing import StandardScaler
 
-from SCHO.ConformalPredictor import Conformal
-from SCHO.utils.RunEfficiency import TimeLogger
-from SCHO.utils.RunEfficiency import ConformalRuntimeOptimizer
-from SCHO.utils.NLPhelper import NLPEncoder
-from SCHO.utils.DataHandling import Filing
+from SCHO.conformal_methods import Conformal
+from SCHO.utils.runtime_eval import TimeLogger
+from SCHO.utils.runtime_eval import ConformalRuntimeOptimizer
+from NLPhelper import NLPEncoder
+from SCHO.wrappers.keras_wrappers import CNNClassifier
 from sklearn.neural_network import MLPRegressor
 from tqdm import tqdm
 
 
-class HyperRegCV:
-    def __init__(self, model, random_state=None):
+class SeqTune:
+    def __init__(self, model, hyperparameter_space=None, random_state=None):
         self.model = model
         self.random_state = random_state
-
+        self.hyperparameter_space = hyperparameter_space
         self.n_epochs_used = None
 
-    @staticmethod
-    def get_toy_dataset(dataset_name, return_pre_split_tuple=False):
-        if dataset_name == "iris":
-            toy_dataset = sklearn_datasets.load_iris()
-            X = toy_dataset.data
-            Y = toy_dataset.target
-        elif dataset_name == "cup":
-            toy_dataset = sklearn_datasets.fetch_kddcup99(percent10=False, subset="SA", random_state=10)
-            X = toy_dataset.data
-            Y = toy_dataset.target
-            Y = np.where(pd.Series(Y).astype(str).str.contains("normal"), "normal", "attack")
-            Y = pd.factorize(Y)[0]
-            XY = pd.DataFrame(np.hstack([X, Y.reshape(len(Y), 1)])).drop_duplicates()
-            XY = ClassRebalancer._binary_class_rebalancing(data=XY, y_name=(XY.shape[1] - 1))
-            X = XY.drop([(XY.shape[1] - 1)], axis=1).to_numpy()
-            X = PreProcessingHelper.one_hot_encode_variables(X)
-            Y = XY[XY.shape[1] - 1].to_numpy().astype(int)
-        elif dataset_name == "diabetes":
-            toy_dataset = sklearn_datasets.load_diabetes()
-            X = toy_dataset.data
-            Y = toy_dataset.target
-        elif dataset_name == "cali":
-            toy_dataset = sklearn_datasets.fetch_california_housing()
-            X = toy_dataset.data
-            Y = toy_dataset.target
-        elif dataset_name == "friedman1":
-            X, Y = sklearn_datasets.make_friedman1(n_samples=2000, n_features=15, random_state=10)
-        elif dataset_name == "census":
-            raw_data = pd.read_csv(Filing.input_parent_folder_path + "/datasets/census/census.data", sep=',')
-            raw_data_formatted = pd.DataFrame()
-            for l in range(0, raw_data.shape[1]):
-                try:
-                    raw_data_formatted = pd.concat([raw_data_formatted, raw_data.iloc[:, l].astype(float)], axis=1)
-                except:
-                    raw_data_formatted = pd.concat([raw_data_formatted, pd.get_dummies(raw_data.iloc[:, l])], axis=1)
-            raw_data_formatted = raw_data_formatted.drop([" <=50K"], axis=1).reset_index(drop=True)
-
-            raw_data_formatted = ClassRebalancer._binary_class_rebalancing(data=raw_data_formatted, y_name=" >50K")
-            X = (raw_data_formatted.drop([" >50K"], axis=1)).to_numpy()
-            Y = raw_data_formatted[" >50K"].to_numpy()
-            Y = Y.astype('int')
-            # undersampling_index = list(np.random.choice(len(X), 5000, replace=False))
-            # X = X[undersampling_index, :]
-            # Y = Y[undersampling_index]
-        elif dataset_name == "cancer" or dataset_name == "tabular_test_data":
-            toy_dataset = sklearn_datasets.load_breast_cancer()
-            X = toy_dataset.data
-            Y = toy_dataset.target
-        elif dataset_name == "digits":
-            toy_dataset = sklearn_datasets.load_digits()
-            X = toy_dataset.data / 16
-            Y = toy_dataset.target
-        elif dataset_name == "20news":
-            toy_dataset = sklearn_datasets.fetch_20newsgroups()
-            X = np.array(toy_dataset.data)
-            Y = toy_dataset.target
-
-            undersampling_index = list(np.random.choice(len(X), 2000, replace=False))
-            X = X[undersampling_index]
-            Y = Y[undersampling_index]
-        elif dataset_name == "covertype":
-            raw_data = pd.read_csv(Filing.parent_folder_path + "/datasets/covertype/covtype.data", sep=',')
-
-            X = raw_data.iloc[:, :-1].to_numpy()
-            Y = raw_data.iloc[:, -1].to_numpy()
-
-            undersampling_index = list(np.random.choice(len(X), 20, replace=False))
-            X = X[undersampling_index, :]
-            Y = Y[undersampling_index]
-            Y = Y.astype('int')
-
-        elif dataset_name == "olivetti":
-            toy_dataset = sklearn_datasets.fetch_olivetti_faces()
-            X = toy_dataset.data
-            Y = toy_dataset.target
-        elif dataset_name == "mnist" or dataset_name == "convolutional_test_data":
-            (x_train, y_train), (x_test, y_test) = keras_datasets.mnist.load_data()
-            x_train = x_train / 255
-            x_test = x_test / 255
-
-            if dataset_name == "convolutional_test_data":
-                undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
-                x_train = x_train[undersampling_index, :]
-                y_train = y_train[undersampling_index]
-                y_train = y_train.astype('int')
-
-                undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
-                x_test = x_test[undersampling_index, :]
-                y_test = y_test[undersampling_index]
-                y_test = y_test.astype('int')
-
-            if return_pre_split_tuple:
-                return x_train, y_train, x_test, y_test
-            else:
-                return x_train, y_train
-        elif dataset_name == "cifar10":
-            (x_train, y_train), (x_test, y_test) = keras_datasets.cifar10.load_data()
-            # undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
-            # x_train = x_train[undersampling_index, :]
-            x_train = x_train / 255
-            x_test = x_test / 255
-            # y_train = y_train[undersampling_index]
-            if return_pre_split_tuple:
-                return x_train, y_train, x_test, y_test
-            else:
-                return x_train, y_train
-
-        elif dataset_name == "colorectal":
-            colorectal_raw_data = tfds.load("colorectal_histology", split='train')
-            images = []
-            labels = []
-            # Iterate over a dataset
-            for i, image_dict in enumerate(tfds.as_numpy(colorectal_raw_data)):
-                images.append(image_dict["image"])
-                labels.append(image_dict["label"])
-            # images = tf.image.resize(images, [32,32]).numpy()
-
-            X = np.array(images)
-            Y = np.array(labels)
-            # undersampling_index = list(np.random.choice(len(X), 10000, replace=False))
-            # X = X[undersampling_index, :]
-            X = X / 255
-            # Y = Y[undersampling_index]
-
-            return X, Y
-
-        elif dataset_name == "svhn":
-            svhn_raw_data = tfds.load("svhn_cropped", split='train')
-            images = []
-            labels = []
-            for i, image_dict in enumerate(tfds.as_numpy(svhn_raw_data)):
-                images.append(image_dict["image"])
-                labels.append(image_dict["label"])
-            # images = tf.image.resize(images, [32,32]).numpy()
-
-            X = np.array(images)
-            Y = np.array(labels)
-            undersampling_index = list(np.random.choice(len(X), 30000, replace=False))
-            X = X[undersampling_index, :]
-            X = X / 255
-            Y = Y[undersampling_index]
-
-            return X, Y
-
-
-        elif dataset_name == "stl10":
-            stl10_raw_data_train = tfds.load("stl10", split='train')
-            stl10_raw_data_test = tfds.load("stl10", split='test')
-            train_images = []
-            train_labels = []
-            for i, image_dict in enumerate(tfds.as_numpy(stl10_raw_data_train)):
-                train_images.append(image_dict["image"])
-                train_labels.append(image_dict["label"])
-            test_images = []
-            test_labels = []
-            for i, image_dict in enumerate(tfds.as_numpy(stl10_raw_data_test)):
-                test_images.append(image_dict["image"])
-                test_labels.append(image_dict["label"])
-            X = np.array(train_images + test_images)
-            Y = np.array(train_labels + test_labels)
-            # undersampling_index = list(np.random.choice(len(X), 20000, replace=False))
-            # X = X[undersampling_index, :]
-            X = X / 255
-            # Y = Y[undersampling_index]
-
-            return X, Y
-
-
-        elif dataset_name == "cifar100":
-            (x_train, y_train), (x_test, y_test) = keras_datasets.cifar100.load_data()
-            undersampling_index = list(np.random.choice(len(x_train), 20000, replace=False))
-            x_train = x_train[undersampling_index, :]
-            x_train = x_train / 255
-            y_train = y_train[undersampling_index]
-
-            return x_train, y_train
-        elif dataset_name == "fashion_mnist":
-            (x_train, y_train), (x_test, y_test) = keras_datasets.fashion_mnist.load_data()
-            x_train = x_train / 255
-            x_test = x_test / 255
-            # y_train = y_train[undersampling_index]
-            if return_pre_split_tuple:
-                return x_train, y_train, x_test, y_test
-            else:
-                return x_train, y_train
-
-        elif dataset_name == "imdb":
-            raw_data = pd.read_csv(Filing.input_parent_folder_path + "/datasets/imdb/imdb_dataset.csv")
-            X = raw_data["review"].to_numpy()
-            Y = raw_data["sentiment"].to_numpy()
-            Y[Y == "negative"] = int(0)
-            Y[Y == "positive"] = int(1)
-
-            # undersampling_index = list(np.random.choice(len(X), 25000, replace=False))
-            # X = X[undersampling_index]
-            # Y = Y[undersampling_index]
-            Y = Y.astype('int')
-        return X, Y
-
-    def get_parameters(self):
+    def get_default_hyperparameter_space(self):
         if "mlp" in str(self.model).lower():
             solver_list = ['adam', 'sgd']
             learning_rate_list = [0.00001, 0.0001, 0.001, 0.005, 0.01, 0.05, 0.1]
@@ -260,16 +57,12 @@ class HyperRegCV:
                               'layer_size': layer_size
                               }
 
-        elif "conv" in str(self.model).lower():
+        elif "cnn" in str(self.model).lower():
             solver_list = ['adam', 'sgd']
             learning_rate_list = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05]
             drop_out_rate_list = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
             n_layers = [2, 3, 4]
-            layer_size = list(range(16, 257,
-                                    16))  # list(filter(lambda x: x < 250, list(np.round(np.random.lognormal(0, 0.5, 500) * 64).astype(int))))
-            # convolution_size = [3]
-            # pooling_size = [2]
-            # batch_norm_list = [0]  # yes or no
+            layer_size = list(range(16, 257, 16))
             dense_layer_1_neurons_list = [100, 200, 512]
             dense_layer_2_neurons_list = [0, 0, 0, 0, 50, 100]
 
@@ -278,9 +71,6 @@ class HyperRegCV:
                               'drop_out_rate': drop_out_rate_list,
                               'n_layers': n_layers,
                               'layer_size': layer_size,
-                              # 'convolution_size': convolution_size,
-                              # 'pooling_size': pooling_size,
-                              # 'batch_norm': batch_norm_list,
                               'dl1_neurons': dense_layer_1_neurons_list,
                               'dl2_neurons': dense_layer_2_neurons_list,
                               }
@@ -346,7 +136,7 @@ class HyperRegCV:
             hyperparameter_tuple_randomized = pd.read_pickle(cached_combination_file_path)
             print("Found combination initializer that is less than 365 days old, using cached initializer...")
 
-        elif "mlp" in str(self.model).lower() or "conv" in str(self.model).lower():
+        elif "mlp" in str(self.model).lower() or "cnn" in str(self.model).lower():
 
             for i in tqdm(range(0, 100000)):
                 parameter_combination = []
@@ -366,7 +156,7 @@ class HyperRegCV:
                                 parameter_combination.append(parameter)
                                 if "mlp" in str(self.model).lower():
                                     parameter_combination_columns.append("layer_" + str(j))
-                                elif "conv" in str(self.model).lower():
+                                elif "cnn" in str(self.model).lower():
                                     if key == "layer_size":
                                         parameter_combination_columns.append("l" + str(j) + "_convolutions")
                                     elif key == "convolution_size":
@@ -378,7 +168,7 @@ class HyperRegCV:
                                 parameter_combination.append(parameter)
                                 if "mlp" in str(self.model).lower():
                                     parameter_combination_columns.append("layer_" + str(j))
-                                elif "conv" in str(self.model).lower():
+                                elif "cnn" in str(self.model).lower():
                                     if key == "layer_size":
                                         parameter_combination_columns.append("l" + str(j) + "_convolutions")
                                     elif key == "convolution_size":
@@ -436,7 +226,7 @@ class HyperRegCV:
                 if y_pred_proba.shape[1] == 2:
                     entropy = metrics.log_loss(y_obs, y_pred_proba[:, 1])
                 else:
-                    one_hot_encoded_y_obs = HyperRegCV.pivot_classes(y=y_obs, n_classes=n_classes)
+                    one_hot_encoded_y_obs = SeqTune.pivot_classes(y=y_obs, n_classes=n_classes)
                     scorer = tf.keras.losses.CategoricalCrossentropy()
                     entropy = scorer(one_hot_encoded_y_obs, y_pred_proba).numpy()
                 accuracy = metrics.accuracy_score(y_obs, y_pred)
@@ -501,48 +291,52 @@ class HyperRegCV:
             if presplit_X_y_data_tuple is not None:
                 X_train, Y_train, X_val, Y_val = presplit_X_y_data_tuple
             else:
-                X_val, Y_val, X_train, Y_train = HyperRegCV.train_val_test_split(X=X_IS,
-                                                                                 y=y_IS,
-                                                                                 OOS_split=train_val_split,
-                                                                                 normalize=False,
-                                                                                 random_state=self.random_state)
+                X_val, Y_val, X_train, Y_train = SeqTune.train_val_test_split(X=X_IS,
+                                                                              y=y_IS,
+                                                                              OOS_split=train_val_split,
+                                                                              normalize=False,
+                                                                              random_state=self.random_state)
 
             if "mlp" in str(self.model).lower():
                 if "reg" in str(self.model).lower():
-                    hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                    fitted_model = MLPRegressor(solver=HyperRegCV.solver_mapper(combination),
+                    hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                    fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
                                                 learning_rate_init=combination["learning_rate_init"],
                                                 alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                                 random_state=self.random_state).fit(X_train, Y_train)
                 elif "clas" in str(self.model).lower():
-                    hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                    fitted_model = MLPClassifier(solver=HyperRegCV.solver_mapper(combination),
+                    hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                    fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
                                                  learning_rate_init=combination["learning_rate_init"],
                                                  alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                                  random_state=self.random_state).fit(X_train, Y_train)
 
-            elif "conv" in str(self.model).lower():
-                fitted_model = ConvNet(solver=HyperRegCV.solver_mapper(combination),
-                                       learning_rate=combination['learning_rate'],
-                                       drop_out_rate=combination['drop_out_rate'],
-                                       # batch_norm=int(combination['batch_norm']),
-                                       layer_1_tuple=(
-                                           int(combination['l1_convolutions']), 3),  # int(combination['l1_size'])),
-                                       dense_layer_1=int(combination['dl1_neurons']),
-                                       # epochs=int(combination['epochs']),
-                                       # layer_1_pooling=int(combination["p1_size"]),
-                                       # layer_2_pooling=int(combination["p2_size"]),
-                                       # layer_3_pooling=int(combination["p3_size"]),
-                                       # layer_4_pooling=int(combination["p4_size"]),
-                                       layer_2_tuple=(
-                                           int(combination['l2_convolutions']), 3),  # int(combination['l2_size'])),
-                                       layer_3_tuple=(
-                                           int(combination['l3_convolutions']), 3),  # int(combination['l3_size'])),
-                                       layer_4_tuple=(
-                                           int(combination['l4_convolutions']), 3),  # int(combination['l4_size'])),
-                                       dense_layer_2=int(combination['dl2_neurons']),
-                                       random_state=self.random_state
-                                       )
+            elif "cnn" in str(self.model).lower():
+                fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
+                                             learning_rate=combination['learning_rate'],
+                                             drop_out_rate=combination['drop_out_rate'],
+                                             # batch_norm=int(combination['batch_norm']),
+                                             layer_1_tuple=(
+                                                 int(combination['l1_convolutions']), 3),
+                                             # int(combination['l1_size'])),
+                                             dense_layer_1=int(combination['dl1_neurons']),
+                                             # epochs=int(combination['epochs']),
+                                             # layer_1_pooling=int(combination["p1_size"]),
+                                             # layer_2_pooling=int(combination["p2_size"]),
+                                             # layer_3_pooling=int(combination["p3_size"]),
+                                             # layer_4_pooling=int(combination["p4_size"]),
+                                             layer_2_tuple=(
+                                                 int(combination['l2_convolutions']), 3),
+                                             # int(combination['l2_size'])),
+                                             layer_3_tuple=(
+                                                 int(combination['l3_convolutions']), 3),
+                                             # int(combination['l3_size'])),
+                                             layer_4_tuple=(
+                                                 int(combination['l4_convolutions']), 3),
+                                             # int(combination['l4_size'])),
+                                             dense_layer_2=int(combination['dl2_neurons']),
+                                             random_state=self.random_state
+                                             )
                 fitted_model.fit(X_train, Y_train, X_val, Y_val)
 
             if validating_framework == 'train_test_split':
@@ -552,12 +346,12 @@ class HyperRegCV:
                 else:
                     y_pred_proba = None
 
-                loss_profile = HyperRegCV.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=Y_val,
-                                                       n_classes=n_classes, prediction_type=prediction_type)
+                loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=Y_val,
+                                                    n_classes=n_classes, prediction_type=prediction_type)
 
                 final_loss = loss_profile[custom_loss_function]
                 final_variance = np.nan
-                loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
+                loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
 
             elif validating_framework == 'batch_mean':
                 step = 24
@@ -574,15 +368,15 @@ class HyperRegCV:
                     else:
                         y_pred_proba = None
 
-                    loss_profile = HyperRegCV.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=batch_y,
-                                                           n_classes=n_classes)
+                    loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=batch_y,
+                                                        n_classes=n_classes)
                     batch_loss = loss_profile[custom_loss_function]
                     batch_log.append(batch_loss)
 
                 final_loss = np.mean(np.array(batch_log))
                 final_variance = math.sqrt(np.sum(((np.array(batch_log) - np.mean(np.array(batch_log))) ** 2)) / (
                         len(np.array(batch_log)) - 1))
-                loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
+                loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
 
         elif validating_framework == 'k_fold':
             kf = KFold(n_splits=k_fold_splits, random_state=self.random_state, shuffle=True)
@@ -595,39 +389,43 @@ class HyperRegCV:
 
                 if "mlp" in str(self.model).lower():
                     if "reg" in str(self.model).lower():
-                        hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPRegressor(solver=HyperRegCV.solver_mapper(combination),
+                        hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                        fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
                                                     learning_rate_init=combination["learning_rate_init"],
                                                     alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                                     random_state=self.random_state).fit(X_train, Y_train)
                     elif "clas" in str(self.model).lower():
-                        hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPClassifier(solver=HyperRegCV.solver_mapper(combination),
+                        hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                        fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
                                                      learning_rate_init=combination["learning_rate_init"],
                                                      alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                                      random_state=self.random_state).fit(X_train, Y_train)
-                elif "conv" in str(self.model).lower():
-                    fitted_model = ConvNet(solver=HyperRegCV.solver_mapper(combination),
-                                           learning_rate=combination['learning_rate'],
-                                           drop_out_rate=combination['drop_out_rate'],
-                                           # batch_norm=int(combination['batch_norm']),
-                                           layer_1_tuple=(
-                                               int(combination['l1_convolutions']), 3),  # int(combination['l1_size'])),
-                                           dense_layer_1=int(combination['dl1_neurons']),
-                                           # epochs=int(combination['epochs']),
-                                           # layer_1_pooling=int(combination["p1_size"]),
-                                           # layer_2_pooling=int(combination["p2_size"]),
-                                           # layer_3_pooling=int(combination["p3_size"]),
-                                           # layer_4_pooling=int(combination["p4_size"]),
-                                           layer_2_tuple=(
-                                               int(combination['l2_convolutions']), 3),  # int(combination['l2_size'])),
-                                           layer_3_tuple=(
-                                               int(combination['l3_convolutions']), 3),  # int(combination['l3_size'])),
-                                           layer_4_tuple=(
-                                               int(combination['l4_convolutions']), 3),  # int(combination['l4_size'])),
-                                           dense_layer_2=int(combination['dl2_neurons']),
-                                           random_state=self.random_state
-                                           )
+                elif "cnn" in str(self.model).lower():
+                    fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
+                                                 learning_rate=combination['learning_rate'],
+                                                 drop_out_rate=combination['drop_out_rate'],
+                                                 # batch_norm=int(combination['batch_norm']),
+                                                 layer_1_tuple=(
+                                                     int(combination['l1_convolutions']), 3),
+                                                 # int(combination['l1_size'])),
+                                                 dense_layer_1=int(combination['dl1_neurons']),
+                                                 # epochs=int(combination['epochs']),
+                                                 # layer_1_pooling=int(combination["p1_size"]),
+                                                 # layer_2_pooling=int(combination["p2_size"]),
+                                                 # layer_3_pooling=int(combination["p3_size"]),
+                                                 # layer_4_pooling=int(combination["p4_size"]),
+                                                 layer_2_tuple=(
+                                                     int(combination['l2_convolutions']), 3),
+                                                 # int(combination['l2_size'])),
+                                                 layer_3_tuple=(
+                                                     int(combination['l3_convolutions']), 3),
+                                                 # int(combination['l3_size'])),
+                                                 layer_4_tuple=(
+                                                     int(combination['l4_convolutions']), 3),
+                                                 # int(combination['l4_size'])),
+                                                 dense_layer_2=int(combination['dl2_neurons']),
+                                                 random_state=self.random_state
+                                                 )
                     fitted_model.fit(X_train, Y_train)
                 y_pred = fitted_model.predict(X_val)
                 if prediction_type == "classification" or prediction_type == "nlp_classification":
@@ -635,10 +433,10 @@ class HyperRegCV:
                 else:
                     y_pred_proba = None
 
-                loss_profile = HyperRegCV.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=Y_val,
-                                                       n_classes=n_classes)
+                loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=Y_val,
+                                                    n_classes=n_classes)
                 loss = loss_profile[custom_loss_function]
-                loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
+                loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
 
                 K_fold_performance_record.iloc[(fold - 1), 0] = fold
                 K_fold_performance_record.iloc[(fold - 1), 1] = loss
@@ -649,7 +447,7 @@ class HyperRegCV:
             final_loss = float(cross_fold_performance["accuracy"])
             final_variance = np.nan
 
-        if "conv" in str(self.model).lower():
+        if "cnn" in str(self.model).lower():
             self.n_epochs_used = fitted_model.n_epochs_used
 
         # if np.isnan(final_loss):
@@ -662,39 +460,39 @@ class HyperRegCV:
                       batch_data=False, n_classes=2):
         if "mlp" in str(self.model).lower():
             if "reg" in str(self.model).lower():
-                hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                fitted_model = MLPRegressor(solver=HyperRegCV.solver_mapper(combination),
+                hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
                                             learning_rate_init=combination["learning_rate_init"],
                                             alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                             random_state=self.random_state).fit(X_IS, y_IS)
             elif "clas" in str(self.model).lower():
-                hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                fitted_model = MLPClassifier(solver=HyperRegCV.solver_mapper(combination),
+                hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
+                fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
                                              learning_rate_init=combination["learning_rate_init"],
                                              alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
                                              random_state=self.random_state).fit(X_IS, y_IS)
-        elif "conv" in str(self.model).lower():
-            fitted_model = ConvNet(solver=HyperRegCV.solver_mapper(combination),
-                                   learning_rate=combination['learning_rate'],
-                                   drop_out_rate=combination['drop_out_rate'],
-                                   # batch_norm=int(combination['batch_norm']),
-                                   layer_1_tuple=(
-                                       int(combination['l1_convolutions']), int(combination['l1_size'])),
-                                   dense_layer_1=int(combination['dl1_neurons']),
-                                   # epochs=int(combination['epochs']),
-                                   # layer_1_pooling=int(combination["p1_size"]),
-                                   # layer_2_pooling=int(combination["p2_size"]),
-                                   # layer_3_pooling=int(combination["p3_size"]),
-                                   # layer_4_pooling=int(combination["p4_size"]),
-                                   layer_2_tuple=(
-                                       int(combination['l2_convolutions']), 3),  # int(combination['l2_size'])),
-                                   layer_3_tuple=(
-                                       int(combination['l3_convolutions']), 3),  # int(combination['l3_size'])),
-                                   layer_4_tuple=(
-                                       int(combination['l4_convolutions']), 3),  # int(combination['l4_size'])),
-                                   dense_layer_2=int(combination['dl2_neurons']),
-                                   random_state=self.random_state
-                                   )
+        elif "cnn" in str(self.model).lower():
+            fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
+                                         learning_rate=combination['learning_rate'],
+                                         drop_out_rate=combination['drop_out_rate'],
+                                         # batch_norm=int(combination['batch_norm']),
+                                         layer_1_tuple=(
+                                             int(combination['l1_convolutions']), int(combination['l1_size'])),
+                                         dense_layer_1=int(combination['dl1_neurons']),
+                                         # epochs=int(combination['epochs']),
+                                         # layer_1_pooling=int(combination["p1_size"]),
+                                         # layer_2_pooling=int(combination["p2_size"]),
+                                         # layer_3_pooling=int(combination["p3_size"]),
+                                         # layer_4_pooling=int(combination["p4_size"]),
+                                         layer_2_tuple=(
+                                             int(combination['l2_convolutions']), 3),  # int(combination['l2_size'])),
+                                         layer_3_tuple=(
+                                             int(combination['l3_convolutions']), 3),  # int(combination['l3_size'])),
+                                         layer_4_tuple=(
+                                             int(combination['l4_convolutions']), 3),  # int(combination['l4_size'])),
+                                         dense_layer_2=int(combination['dl2_neurons']),
+                                         random_state=self.random_state
+                                         )
             fitted_model.fit(X_IS, y_IS)
 
         if not batch_data:
@@ -703,11 +501,11 @@ class HyperRegCV:
                 y_pred_proba = fitted_model.predict_proba(X_OOS)
             else:
                 y_pred_proba = None
-            loss_profile = HyperRegCV.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba,
-                                                   y_obs=y_OOS, n_classes=n_classes, prediction_type=prediction_type)
+            loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba,
+                                                y_obs=y_OOS, n_classes=n_classes, prediction_type=prediction_type)
             final_loss = loss_profile[custom_loss_function]
             final_variance = np.nan
-            loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
+            loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
 
         else:
             step = 24
@@ -724,14 +522,14 @@ class HyperRegCV:
                 else:
                     y_pred_proba = None
 
-                loss_profile = HyperRegCV.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=batch_y,
-                                                       n_classes=n_classes)
+                loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=batch_y,
+                                                    n_classes=n_classes)
                 batch_loss = loss_profile[custom_loss_function]
                 batch_log.append(batch_loss)
 
             final_loss = np.mean(np.array(batch_log))
             final_variance = np.var(np.array(batch_log)) / math.sqrt(len(np.array(batch_log)))
-            loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
+            loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
 
         return final_loss, final_variance, loss_direction, loss_profile
 
@@ -761,7 +559,10 @@ class HyperRegCV:
             else:
                 custom_loss_function = "accuracy_score"
 
-        parameter_grid = self.get_parameters()
+        if self.hyperparameter_space is not None:
+            parameter_grid = self.hyperparameter_space
+        else:
+            parameter_grid = self.get_default_hyperparameter_space()
         hyperparameter_tuple_ordered = self.get_hyperparameter_combinations(parameter_grid=parameter_grid)
         hyperparameter_performance_record = self.build_hyperparameter_logger(
             hyperparameter_combinations=hyperparameter_tuple_ordered)
@@ -774,11 +575,11 @@ class HyperRegCV:
             X_IS, y_IS, X_OOS, y_OOS = presplit_X_y_data_tuple
         elif "nlp" not in prediction_type.lower():
             # TODO: below set normalization to true for normal data,and false for image data, in future handle automatically
-            X_OOS, y_OOS, X_IS, y_IS = HyperRegCV.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                       normalize=False, random_state=self.random_state)
+            X_OOS, y_OOS, X_IS, y_IS = SeqTune.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
+                                                                    normalize=False, random_state=self.random_state)
         else:
-            X_OOS, y_OOS, X_IS, y_IS = HyperRegCV.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                              random_state=self.random_state)
+            X_OOS, y_OOS, X_IS, y_IS = SeqTune.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
+                                                                           random_state=self.random_state)
 
         i = 0
         last_retraining_iteration_counter = 0
@@ -821,8 +622,7 @@ class HyperRegCV:
                 logged_combination['accuracy_score'] = validation_loss_profile["accuracy_score"]
                 logged_combination['log_loss'] = validation_loss_profile["log_loss"]
                 logged_combination['variance'] = validation_variance
-                # if "conv" in str(self.model).lower() and self.n_epochs_used is not None:
-                #     logged_combination['epochs'] = self.n_epochs_used
+
                 log_time = time.time()
                 log_elapse = log_time - start_time
                 logged_combination['runtime'] = log_elapse
@@ -864,11 +664,11 @@ class HyperRegCV:
                     hyperparameter_X, hyperparameter_Y = outlier_remover.apply_outlier_remover(
                         X=np.array(hyperparameter_X), y=np.array(hyperparameter_Y))
 
-                HR_X_OOS, HR_y_OOS, HR_X_IS, HR_y_IS = HyperRegCV.train_val_test_split(X=np.array(hyperparameter_X),
-                                                                                       y=np.array(hyperparameter_Y),
-                                                                                       OOS_split=hyperreg_OOS_split,
-                                                                                       normalize=False,
-                                                                                       random_state=self.random_state)
+                HR_X_OOS, HR_y_OOS, HR_X_IS, HR_y_IS = SeqTune.train_val_test_split(X=np.array(hyperparameter_X),
+                                                                                    y=np.array(hyperparameter_Y),
+                                                                                    OOS_split=hyperreg_OOS_split,
+                                                                                    normalize=False,
+                                                                                    random_state=self.random_state)
 
                 if (i == min_training_iterations + 1) or (
                         i - last_retraining_iteration_counter >= conformal_retraining_frequency):
@@ -967,8 +767,7 @@ class HyperRegCV:
                 maximal_parameter_logged['accuracy_score'] = validation_loss_profile["accuracy_score"]
                 maximal_parameter_logged['log_loss'] = validation_loss_profile["log_loss"]
                 maximal_parameter_logged['variance'] = validation_variance
-                # if "conv" in str(self.model).lower() and self.n_epochs_used is not None:
-                #     maximal_parameter_logged['epochs'] = self.n_epochs_used
+
                 log_time = time.time()
                 log_elapse = log_time - start_time
                 maximal_parameter_logged['runtime'] = log_elapse
@@ -996,7 +795,7 @@ class HyperRegCV:
                 optimal_parameters = hyperparameter_performance_record.iloc[optimal_idx, :]
 
                 optimal_parameters_conv_modified = optimal_parameters.copy()
-                if "conv" in str(self.model).lower() and self.n_epochs_used is not None:
+                if "cnn" in str(self.model).lower() and self.n_epochs_used is not None:
                     optimal_parameters_conv_modified['epochs'] = self.n_epochs_used
 
                 if validating_framework == 'batch_mean':
@@ -1059,57 +858,6 @@ class HyperRegCV:
 
         return OOS_optimal_performance_per_iteration, hyperparameter_performance_record
 
-    def get_true_loss_profile(self, X, y, OOS_split=0.3):
-        if "mlp" in str(self.model).lower():
-
-            parameter_grid = self.get_parameters()
-            hyperparameter_tuple_ordered = self.get_hyperparameter_combinations(parameter_grid=parameter_grid)
-            hyperparameter_performance_record = self.build_hyperparameter_logger(
-                hyperparameter_combinations=hyperparameter_tuple_ordered)
-
-            i = 0
-            for row in tqdm(range(0, len(hyperparameter_tuple_ordered))):
-                combination = hyperparameter_tuple_ordered.iloc[row, :]
-                X_OOS, y_OOS, X_IS, y_IS = HyperRegCV.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                           random_state=self.random_state)
-
-                hidden_layers = HyperRegCV.tuplify_network_layer_sizes(combination)
-                if "reg" in str(self.model).lower():
-                    optimal_fitted_model = MLPRegressor(solver=HyperRegCV.solver_mapper(combination),
-                                                        learning_rate_init=combination["learning_rate_init"],
-                                                        alpha=combination["alpha"],
-                                                        hidden_layer_sizes=hidden_layers,
-                                                        random_state=self.random_state).fit(
-                        X_IS, y_IS)
-                elif "clas" in str(self.model).lower():
-                    optimal_fitted_model = MLPClassifier(solver=HyperRegCV.solver_mapper(combination),
-                                                         learning_rate_init=combination["learning_rate_init"],
-                                                         alpha=combination["alpha"],
-                                                         hidden_layer_sizes=hidden_layers,
-                                                         random_state=self.random_state).fit(
-                        X_IS, y_IS)
-                optimal_y_pred = optimal_fitted_model.predict(X_OOS)
-                if prediction_type == "classification" or prediction_type == "nlp_classification":
-                    optimal_y_pred_proba = optimal_fitted_model.predict_proba(X_OOS)
-                else:
-                    optimal_y_pred_proba = None
-                loss_profile = HyperRegCV.loss_profile(y_pred=optimal_y_pred, y_pred_proba=optimal_y_pred_proba,
-                                                       y_obs=y_OOS, n_classes=n_classes)
-                optimal_loss = loss_profile[custom_loss_function]
-                loss_direction = HyperRegCV.loss_metric_direction(custom_loss_function)
-
-                hyperparameter_performance_record.iloc[i, :] = [HyperRegCV.solver_mapper(combination),
-                                                                combination["learning_rate_init"],
-                                                                combination["alpha"],
-                                                                str(hidden_layers),
-                                                                combination["layer_1"],
-                                                                combination["layer_2"],
-                                                                combination["layer_3"],
-                                                                combination["adam"],
-                                                                combination["sgd"], optimal_loss]
-                i = i + 1
-        return hyperparameter_performance_record
-
     def fit_random_search(self, X, y, custom_loss_function=None, n_searches=60, max_runtime=3600, OOS_split=0.3,
                           train_val_split=0.6,
                           validating_framework='train_test_split', k_fold_splits=None,
@@ -1123,7 +871,10 @@ class HyperRegCV:
             else:
                 custom_loss_function = "accuracy_score"
 
-        parameter_grid = self.get_parameters()
+        if self.hyperparameter_space is not None:
+            parameter_grid = self.hyperparameter_space
+        else:
+            parameter_grid = self.get_default_hyperparameter_space()
         hyperparameter_tuple_ordered = self.get_hyperparameter_combinations(parameter_grid=parameter_grid)
         hyperparameter_performance_record = self.build_hyperparameter_logger(
             hyperparameter_combinations=hyperparameter_tuple_ordered)
@@ -1136,11 +887,11 @@ class HyperRegCV:
             X_IS, y_IS, X_OOS, y_OOS = presplit_X_y_data_tuple
         elif "nlp" not in prediction_type.lower():
             # TODO: below set normalization to true for normal data,and false for image data, in future handle automatically
-            X_OOS, y_OOS, X_IS, y_IS = HyperRegCV.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                       normalize=False, random_state=self.random_state)
+            X_OOS, y_OOS, X_IS, y_IS = SeqTune.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
+                                                                    normalize=False, random_state=self.random_state)
         else:
-            X_OOS, y_OOS, X_IS, y_IS = HyperRegCV.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                              random_state=self.random_state)
+            X_OOS, y_OOS, X_IS, y_IS = SeqTune.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
+                                                                           random_state=self.random_state)
 
         i = 0
         start_time = time.time()
@@ -1171,8 +922,7 @@ class HyperRegCV:
             logged_combination['accuracy_score'] = validation_loss_profile["accuracy_score"]
             logged_combination['log_loss'] = validation_loss_profile["log_loss"]
             logged_combination['variance'] = validation_variance
-            # if "conv" in str(self.model).lower() and self.n_epochs_used is not None:
-            #     logged_combination['epochs'] = self.n_epochs_used
+
             log_time = time.time()
             log_elapse = log_time - start_time
             logged_combination['runtime'] = log_elapse
@@ -1194,7 +944,7 @@ class HyperRegCV:
                 optimal_parameters = hyperparameter_performance_record.iloc[optimal_idx, :]
 
                 optimal_parameters_conv_modified = optimal_parameters.copy()
-                if "conv" in str(self.model).lower() and self.n_epochs_used is not None:
+                if "cnn" in str(self.model).lower() and self.n_epochs_used is not None:
                     optimal_parameters_conv_modified['epochs'] = self.n_epochs_used
 
                 if validating_framework == 'batch_mean':
@@ -1253,260 +1003,6 @@ class HyperRegCV:
             return "sgd"
 
 
-class ConvNet:
-    def __init__(self,
-                 solver='adam',
-                 learning_rate=0.0001,
-                 drop_out_rate=0.01,
-                 layer_1_tuple=(50, 9),
-                 dense_layer_1=100,
-                 # epochs=10,
-                 batch_norm=0,
-                 layer_1_pooling=2,
-                 layer_2_pooling=2,
-                 layer_3_pooling=2,
-                 layer_4_pooling=0,
-                 layer_2_tuple=None,
-                 layer_3_tuple=None,
-                 layer_4_tuple=None,
-                 dense_layer_2=None,
-                 random_state=None
-                 ):
-        self.solver = solver
-        self.learning_rate = learning_rate
-        self.drop_out_rate = drop_out_rate
-        self.batch_norm = batch_norm
-        # self.epochs = epochs
-        self.layer_1_tuple = layer_1_tuple  # (number of convolutions, convolution size)
-        self.layer_1_pooling = layer_1_pooling
-        self.layer_2_tuple = layer_2_tuple
-        self.layer_2_pooling = layer_2_pooling
-        self.layer_3_tuple = layer_3_tuple
-        self.layer_3_pooling = layer_3_pooling
-        self.layer_4_tuple = layer_4_tuple
-        self.layer_4_pooling = layer_4_pooling
-        self.dense_layer_1 = dense_layer_1
-        self.dense_layer_2 = dense_layer_2
-
-        self.n_epochs_used = None
-        self.trained_model = None
-        self.random_state = random_state
-
-    def __str__(self):
-        return "ConvNet()"
-
-    def __repr__(self):
-        return "ConvNet()"
-
-    def fit(self, X, y, val_X=None, val_Y=None):
-        if self.random_state is not None:
-            random.seed(1234)
-            np.random.seed(1234)
-            tf.random.set_seed(1234)
-
-        model = models.Sequential()
-        input_shape = list(X.shape)
-        input_shape.remove(max(input_shape))
-        try:
-            channels = input_shape[2]
-        except:
-            channels = 1
-
-        model.add(
-            layers.Conv2D(self.layer_1_tuple[0], (self.layer_1_tuple[1], self.layer_1_tuple[1]), activation='relu',
-                          padding='same'
-                          # , kernel_initializer='he_uniform'
-                          # bias_initializer=initializers.Zeros()
-                          , input_shape=tuple([(set([x for x in (X.shape) if (X.shape).count(x) > 1])).pop(),
-                                               (set([x for x in (X.shape) if (X.shape).count(x) > 1])).pop(),
-                                               channels])))
-        # if self.batch_norm == 1:
-        #     model.add(layers.BatchNormalization())
-        # model.add(
-        #     layers.Conv2D(self.layer_1_tuple[0], (self.layer_1_tuple[1], self.layer_1_tuple[1]), activation='relu',
-        #                   padding='same'
-        #                   # ,kernel_initializer='he_uniform'
-        #                   # bias_initializer=initializers.Zeros()
-        #                   ))
-        if self.batch_norm == 1:
-            model.add(layers.BatchNormalization())
-        if self.layer_1_pooling is not None:
-            if self.layer_1_pooling != 0:
-                model.add(layers.MaxPooling2D((self.layer_1_pooling, self.layer_1_pooling)))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_2_tuple is not None:
-            if self.layer_2_tuple[0] != 0 and self.layer_2_tuple[1] != 0:
-                model.add(layers.Conv2D(self.layer_2_tuple[0], (self.layer_2_tuple[1], self.layer_2_tuple[1])
-                                        # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                                        # bias_initializer=initializers.Zeros()
-                                        , activation='relu',
-                                        padding='same'))
-                # if self.batch_norm == 1:
-                #     model.add(layers.BatchNormalization())
-                # model.add(layers.Conv2D(self.layer_2_tuple[0], (self.layer_2_tuple[1], self.layer_2_tuple[1])
-                #                         # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                #                         # bias_initializer=initializers.Zeros()
-                #                         , activation='relu',
-                #                         padding='same'))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_2_pooling is not None:
-            if self.layer_2_pooling != 0:
-                model.add(layers.MaxPooling2D((self.layer_2_pooling, self.layer_2_pooling)))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_3_tuple is not None:
-            if self.layer_3_tuple[0] != 0 and self.layer_3_tuple[1] != 0:
-                model.add(layers.Conv2D(self.layer_3_tuple[0], (self.layer_3_tuple[1], self.layer_3_tuple[1])
-                                        # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                                        # bias_initializer=initializers.Zeros()
-                                        , activation='relu',
-                                        padding='same'))
-                # if self.batch_norm == 1:
-                #     model.add(layers.BatchNormalization())
-                # model.add(layers.Conv2D(self.layer_3_tuple[0], (self.layer_3_tuple[1], self.layer_3_tuple[1])
-                #                         # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                #                         # bias_initializer=initializers.Zeros()
-                #                         , activation='relu',
-                #                         padding='same'))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_3_pooling is not None:
-            if self.layer_3_pooling != 0:
-                model.add(layers.MaxPooling2D((self.layer_3_pooling, self.layer_3_pooling)))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_4_tuple is not None:
-            if self.layer_4_tuple[0] != 0 and self.layer_4_tuple[1] != 0:
-                model.add(layers.Conv2D(self.layer_4_tuple[0], (self.layer_4_tuple[1], self.layer_4_tuple[1])
-                                        # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                                        # bias_initializer=initializers.Zeros()
-                                        , activation='relu',
-                                        padding='same'))
-                # if self.batch_norm == 1:
-                #     model.add(layers.BatchNormalization())
-                # model.add(layers.Conv2D(self.layer_4_tuple[0], (self.layer_4_tuple[1], self.layer_4_tuple[1])
-                #                         # , kernel_initializer='he_uniform'                                        #                                              seed=self.random_state),
-                #                         # bias_initializer=initializers.Zeros()
-                #                         , activation='relu',
-                #                         padding='same'))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-        if self.layer_4_pooling is not None:
-            if self.layer_4_pooling != 0:
-                model.add(layers.MaxPooling2D((self.layer_4_pooling, self.layer_4_pooling)))
-                if self.batch_norm == 1:
-                    model.add(layers.BatchNormalization())
-
-        model.add(layers.Flatten())
-        model.add(layers.Dense(self.dense_layer_1, activation='relu'
-                               # , kernel_initializer='he_uniform'
-                               # bias_initializer=initializers.Zeros()
-                               ))
-        model.add(tf.keras.layers.Dropout(self.drop_out_rate))  # , seed=self.random_state))
-        if self.dense_layer_2 is not None:
-            if self.dense_layer_2 != 0:
-                model.add(layers.Dense(self.dense_layer_2, activation='relu'
-                                       # , kernel_initializer='he_uniform'                                       #                                              seed=self.random_state),
-                                       # bias_initializer=initializers.Zeros()
-                                       ))
-                model.add(tf.keras.layers.Dropout(self.drop_out_rate))  # , seed=self.random_state))
-
-        model.add(layers.Dense(len(np.unique(y)), activation='softmax'))
-
-        if self.solver == 'adam':
-            optimizer_config = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
-        elif self.solver == 'sgd':
-            optimizer_config = tf.keras.optimizers.SGD(learning_rate=self.learning_rate)
-        model.compile(loss='sparse_categorical_crossentropy',
-                      # we're using from logits equals true in this loss function because we didn't add a softmax layer at the end of the sequential model api, if you later add this, remember to change this loss to simply crossentropy string, or just set logit to false
-                      metrics=['accuracy'], optimizer=optimizer_config)
-
-        if val_X is not None and val_Y is not None:
-            callback = tf.keras.callbacks.EarlyStopping(monitor='val_accuracy', patience=3,
-                                                        min_delta=0.01)  # min_delta=-0.005
-            model.fit(X, y, validation_data=(val_X, val_Y), epochs=10, batch_size=32, verbose=0,
-                      callbacks=[callback],
-                      shuffle=False)
-            self.n_epochs_used = callback.stopped_epoch
-        elif val_X is None and val_Y is None:
-            model.fit(X, y, epochs=10, batch_size=32, verbose=0,
-                      shuffle=False)
-        self.trained_model = model
-
-    def predict(self, X):
-        y_prob = self.trained_model.predict(X)
-        y_classes = y_prob.argmax(axis=-1)
-        return np.array(y_classes)
-
-    def predict_proba(self, X):
-        y_prob = self.trained_model.predict(X)
-        return np.array(y_prob)
-
-    def evaluate(self, X, y):
-        test_loss, test_acc = self.trained_model.evaluate(X, y, verbose=0)
-        return test_loss, test_acc
-
-
-# import pandas as pd
-# raw_data = pd.read_csv(Filing.parent_folder_path + "/datasets/covertype/covtype.data", sep=',')
-
-class PreProcessingHelper:
-    @staticmethod
-    def one_hot_encode_variables(X):
-        X_encoded = X.copy()
-        X_final = np.zeros(len(X_encoded)).reshape(len(X_encoded), 1)
-        for i in range(0, X_encoded.shape[1]):
-            try:
-                X_encoded[:, i].astype(float)
-                X_final = np.hstack([X_final, X_encoded[:, i].reshape(len(X_encoded[:, i]), 1)])
-            except:
-                X_append = pd.get_dummies(pd.Series(X_encoded[:, i])).to_numpy()
-                X_final = np.hstack([X_final, X_append])
-        X_final = X_final[:, 1:]
-        return X_final
-
-
-class ClassRebalancer:
-    @staticmethod
-    def _binary_class_rebalancing(data, y_name, type="majority_undersampling"):
-        if type == "majority_undersampling":
-            majority_class = data[y_name].mode()[0]
-            minority_class_filtered_dataset = data[data[y_name] != majority_class]
-            majority_class_filtered_dataset = data[data[y_name] == majority_class]
-            majority_class_filtered_dataset = majority_class_filtered_dataset.sample(
-                n=len(minority_class_filtered_dataset),
-                replace=True, random_state=1234)
-            rebalanced_data = pd.concat([minority_class_filtered_dataset, majority_class_filtered_dataset], axis=0)
-        elif type == "minority_oversampling":
-            majority_class = data[y_name].mode()[0]
-            minority_class_filtered_dataset = data[data[y_name] != majority_class]
-            majority_class_filtered_dataset = data[data[y_name] == majority_class]
-            minority_class_filtered_dataset = minority_class_filtered_dataset.sample(
-                n=len(majority_class_filtered_dataset),
-                replace=True, random_state=1234)
-            rebalanced_data = pd.concat([minority_class_filtered_dataset, majority_class_filtered_dataset], axis=0)
-
-        return rebalanced_data
-
-    @staticmethod
-    def _multi_label_class_rebalancing(data, y_name, type="majority_undersampling"):
-        if type == "majority_undersampling":
-            lowest_represented_class = data[y_name].value_counts().index[-1]
-            lowest_represented_class_filtered_dataset = data[data[y_name] == lowest_represented_class]
-            rebalanced_data = lowest_represented_class_filtered_dataset.copy()
-            for label in data[y_name].unique():
-                if label != lowest_represented_class:
-                    filtered_dataset = data[data[y_name] == label]
-                    resampled_filtered_dataset = filtered_dataset.sample(
-                        n=len(lowest_represented_class_filtered_dataset),
-                        replace=True, random_state=1234)
-                    rebalanced_data = pd.concat([rebalanced_data, resampled_filtered_dataset], axis=0)
-
-        return rebalanced_data
-
-
 class OutlierRemover:
     def __init__(self, method):
         self.method = method
@@ -1555,26 +1051,3 @@ class OutlierRemover:
             y_outlier_cleaned = y[idx_keep]
 
         return X_outlier_cleaned, y_outlier_cleaned
-
-# (x_train, y_train), (x_test, y_test) = keras_datasets.cifar10.load_data()
-# x_train = x_train / 255
-# x_test = x_test / 255
-# undersampling_index = list(np.random.choice(len(x_train), 10000, replace=False))
-# x_train = x_train[undersampling_index, :]
-# y_train = y_train[undersampling_index]
-#
-# ConvNet(solver='adam',
-#         learning_rate=0.001,
-#         drop_out_rate=0.3,
-#         layer_1_tuple=(32, 3),
-#         dense_layer_1=256,
-#         batch_norm=0,
-#         layer_1_pooling=0,
-#         layer_2_pooling=2,
-#         layer_3_pooling=2,
-#         layer_4_pooling=2,
-#         layer_2_tuple=(128, 3),
-#         layer_3_tuple=(255, 3),
-#         layer_4_tuple=(255, 3),
-#         dense_layer_2=None,
-#         random_state=1234).fit(x_train, y_train, x_test, y_test)

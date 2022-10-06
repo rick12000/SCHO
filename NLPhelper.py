@@ -14,7 +14,7 @@ import gensim.downloader
 import pickle
 import warnings
 
-from SCHO.utils.DataHandling import Filing
+from DataHandling import Filing
 
 warnings.filterwarnings("ignore")
 import time
