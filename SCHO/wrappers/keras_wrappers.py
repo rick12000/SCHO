@@ -43,10 +43,10 @@ class CNNClassifier:
         self.random_state = random_state
 
     def __str__(self):
-        return "ConvNet()"
+        return "CNNClassifier()"
 
     def __repr__(self):
-        return "ConvNet()"
+        return "CNNClassifier()"
 
     def fit(self, X, y, val_X=None, val_Y=None):
         if self.random_state is not None:

@@ -94,12 +94,13 @@ class ToyDatasets:
             x_test = x_test / 255
 
             if dataset_name == "convolutional_test_data":
-                undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
+                resample_n = 1000
+                undersampling_index = list(np.random.choice(len(x_train), resample_n, replace=False))
                 x_train = x_train[undersampling_index, :]
                 y_train = y_train[undersampling_index]
                 y_train = y_train.astype('int')
 
-                undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
+                undersampling_index = list(np.random.choice(len(x_train), resample_n, replace=False))
                 x_test = x_test[undersampling_index, :]
                 y_test = y_test[undersampling_index]
                 y_test = y_test.astype('int')

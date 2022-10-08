@@ -72,7 +72,7 @@ class SeqTune:
                               'n_layers': n_layers,
                               'layer_size': layer_size,
                               'dl1_neurons': dense_layer_1_neurons_list,
-                              'dl2_neurons': dense_layer_2_neurons_list,
+                              'dl2_neurons': dense_layer_2_neurons_list
                               }
 
         return parameter_dict
