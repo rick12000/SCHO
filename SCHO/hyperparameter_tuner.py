@@ -339,15 +339,12 @@ class SeqTune:
                                                                               normalize=False,
                                                                               random_state=self.random_state)
 
-            if "mlp" in str(self.model).lower():
-                if "reg" in str(self.model).lower():
-                    fitted_model = MLPRegressor(**combination_input_dict).fit(X_train, Y_train)
-                elif "clas" in str(self.model).lower():
-                    fitted_model = MLPClassifier(**combination_input_dict).fit(X_train, Y_train)
-
-            elif "cnn" in str(self.model).lower():
+            if "cnn" in str(self.model).lower():
                 fitted_model = CNNClassifier(**combination_input_dict)
                 fitted_model.fit(X_train, Y_train, X_val, Y_val)
+
+            else:
+                fitted_model = eval(str(self.model).split("(")[0] + "(**" + str(combination_input_dict) + ")").fit(X_train, Y_train)
 
             if validating_framework == 'train_test_split':
                 y_pred = fitted_model.predict(X_val)
@@ -397,16 +394,14 @@ class SeqTune:
                 X_train, X_val = X_IS[train_index, :], X_IS[test_index, :]
                 Y_train, Y_val = y_IS[train_index], y_IS[test_index]
 
-                if "mlp" in str(self.model).lower():
-                    if "reg" in str(self.model).lower():
-                        hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPRegressor(**combination_input_dict).fit(X_train, Y_train)
-                    elif "clas" in str(self.model).lower():
-                        hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPClassifier(**combination_input_dict).fit(X_train, Y_train)
-                elif "cnn" in str(self.model).lower():
+                if "cnn" in str(self.model).lower():
                     fitted_model = CNNClassifier(**combination_input_dict)
-                    fitted_model.fit(X_train, Y_train)
+                    fitted_model.fit(X_train, Y_train, X_val, Y_val)
+
+                else:
+                    fitted_model = eval(str(self.model).split("(")[0] + "(**" + str(combination_input_dict) + ")").fit(
+                        X_train, Y_train)
+
                 y_pred = fitted_model.predict(X_val)
                 if prediction_type == "classification" or prediction_type == "nlp_classification":
                     y_pred_proba = y_pred_proba = fitted_model.predict_proba(X_val)
