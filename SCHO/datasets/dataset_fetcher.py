@@ -4,6 +4,7 @@ import tensorflow_datasets as tfds
 import numpy as np
 import pandas as pd
 
+# TODO: add normalizer
 
 class ToyDatasets:
     @staticmethod

@@ -38,7 +38,6 @@ class Analytics:
         cross_model_log = cross_model_log.reset_index(drop=True)
 
         aggregation = {"runtime": ["max", "count"], "accuracy": [Analytics.get_last, "mean"],
-                       "95_CI": Analytics.get_last,
                        "CI_breach": "mean"}
         results_table = cross_model_log.groupby(["secondary_model", "cp_scorer"],
                                                 as_index=False).agg(
@@ -50,8 +49,8 @@ class Analytics:
             cross_model_log.groupby(["secondary_model", "cp_scorer"]).accuracy.idxmax().fillna(
                 0).values, :][
                 # fillna with 0 is not good, it only applies to when OOS is not selected as an option in train test split and this returns Nans for the OOS entries, replacing with 0 means arbitrarily selecting the 0th row instead of the idxmax for the OOS data, even though this hould correspond to Nan anyway which is fine
-                ["secondary_model", "cp_scorer", "accuracy", "95_CI"]]
-        adjunct_results_table = adjunct_results_table.rename(columns={"accuracy": "accuracymax", "95_CI": "95_CImax"})
+                ["secondary_model", "cp_scorer", "accuracy"]]
+        adjunct_results_table = adjunct_results_table.rename(columns={"accuracy": "accuracymax"})
         results_table = pd.merge(results_table, adjunct_results_table, how='left',
                                  on=["secondary_model", "cp_scorer"])
         results_table = results_table.drop(["runtimemax"], axis=1)

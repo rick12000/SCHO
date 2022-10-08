@@ -140,7 +140,7 @@ class PlotHelper:
                 model_logging_data = logging_data[(logging_data[line_indexing_variable] == secondary_model) & (
                         logging_data[chart_indexing_variable] == CP_scorer)].reset_index(drop=True)
                 predictions = np.array(model_logging_data[outcome_variable])
-                ci = np.array(model_logging_data['95_CI'])
+                # ci = np.array(model_logging_data['95_CI'])
                 if min_aggregation:
                     for i in range(0, len(predictions)):
                         if i == 0:
@@ -320,7 +320,7 @@ class PlotHelper:
 
                 predictions = np.array(model_logging_data['accuracy'])
                 minutes = np.array(model_logging_data["runtime"] / 60)
-                ci = np.array(model_logging_data['95_CI'])
+                # ci = np.array(model_logging_data['95_CI'])
                 if min_aggregation:
                     for i in range(0, len(predictions)):
                         if i == 0:
@@ -459,7 +459,7 @@ class PlotHelper:
                                 dataset_filtered_logging_data["sample_category"] == sample_category)].reset_index(
                         drop=True)
                     predictions = np.array(model_logging_data['accuracy'])
-                    ci = np.array(model_logging_data['95_CI'])
+                    # ci = np.array(model_logging_data['95_CI'])
                     if sample_category == "IS" and min_aggregation:
                         for i in range(0, len(predictions)):
                             if i == 0:

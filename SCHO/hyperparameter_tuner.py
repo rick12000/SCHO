@@ -18,6 +18,7 @@ np.random.seed(1234)
 from sklearn import metrics
 from sklearn.model_selection import KFold
 from sklearn.neural_network import MLPClassifier
+from sklearn.ensemble import RandomForestClassifier
 import tensorflow as tf
 
 session_conf = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=1)
@@ -79,6 +80,15 @@ class SeqTune:
                               'dl1_neurons': dense_layer_1_neurons_list,
                               'dl2_neurons': dense_layer_2_neurons_list
                               }
+
+        elif "forest" in str(self.model).lower():
+            n_estimators_list = [10, 30, 50, 80, 100, 150, 200, 300, 400]
+            min_samples_split_list = [2, 5, 10]
+            # max_features_list = ["sqrt", "log2", "auto"]
+
+            parameter_dict = {'n_estimators': n_estimators_list,
+                              'min_samples_split': min_samples_split_list}
+            # 'max_features': max_features_list}
 
         return parameter_dict
 
@@ -208,6 +218,27 @@ class SeqTune:
                 drop=True)
             hyperparameter_tuple_randomized.to_pickle(cached_combination_file_path)
 
+        else:
+            for i in tqdm(range(0, 10000)):
+                parameter_combination = []
+                parameter_combination_columns = []
+                for key in parameter_grid.keys():
+                    parameter = random.choice(parameter_grid[key])
+                    parameter_combination.append(parameter)
+                    parameter_combination_columns.append(key)
+                if i == 0:
+                    hyperparameter_tuple = pd.DataFrame(parameter_combination).transpose()
+                    hyperparameter_tuple.columns = parameter_combination_columns
+                else:
+                    hyperparameter_tuple.loc[len(hyperparameter_tuple)] = np.transpose(parameter_combination)
+
+            hyperparameter_tuple = hyperparameter_tuple.drop_duplicates()
+
+            hyperparameter_tuple_randomized = hyperparameter_tuple.sample(frac=1,
+                                                                          random_state=self.random_state).reset_index(
+                drop=True)
+            hyperparameter_tuple_randomized.to_pickle(cached_combination_file_path)
+
         print("Hyperparameter space successfully loaded...")
 
         return hyperparameter_tuple_randomized
@@ -316,11 +347,17 @@ class SeqTune:
                           "random_state": self.random_state}
         else:
             input_dict = {}
-            combination_row_parameters_only = combination_row.drop(["accuracy", "accuracy_score", "log_loss",
-                                                                    "variance", "runtime", "CI_breach",
-                                                                    "point_predictor_MSE", "loss_profile_dict"])
-            for parameter in combination_row_parameters_only.columns:
-                input_dict[parameter] = combination_row_parameters_only[parameter]
+            combination_df = combination_row.reset_index()
+            combination_df.columns = ["parameter", "value"]
+            for m in range(0, len(combination_df)):
+                try:
+                    value = int(combination_df["value"].iloc[m])
+                except:
+                    try:
+                        value = float(combination_df["value"].iloc[m])
+                    except:
+                        value = str(combination_df["value"].iloc[m])
+                input_dict[combination_df["parameter"].iloc[m]] = value
         return input_dict
 
     def _get_validation_loss(self, combination, X_IS, y_IS, custom_loss_function, prediction_type,
@@ -344,7 +381,8 @@ class SeqTune:
                 fitted_model.fit(X_train, Y_train, X_val, Y_val)
 
             else:
-                fitted_model = eval(str(self.model).split("(")[0] + "(**" + str(combination_input_dict) + ")").fit(X_train, Y_train)
+                fitted_model = eval(str(self.model).split("(")[0] + "(**" + str(combination_input_dict) + ")").fit(
+                    X_train, Y_train)
 
             if validating_framework == 'train_test_split':
                 y_pred = fitted_model.predict(X_val)
@@ -680,17 +718,24 @@ class SeqTune:
 
             i = i + 1
 
+        hyperparameter_performance_record_parameters_only = hyperparameter_performance_record.drop(
+            ["accuracy", "accuracy_score", "log_loss", "variance", "runtime", "CI_breach",
+             "point_predictor_MSE", "loss_profile_dict"],
+            axis=1)
         self._hyperparameter_performance_record = hyperparameter_performance_record
         if loss_direction == 'direct':
             self.best_score_ = hyperparameter_performance_record["accuracy"].max()
             self.best_params_ = self.combination_row_2_input_dict(
-                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmax(), :])
+                hyperparameter_performance_record_parameters_only.iloc[
+                hyperparameter_performance_record["accuracy"].idxmax(), :])
         elif loss_direction == 'inverse':
             self.best_score_ = hyperparameter_performance_record["accuracy"].min()
             self.best_params_ = self.combination_row_2_input_dict(
-                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmin(), :])
+                hyperparameter_performance_record_parameters_only.iloc[
+                hyperparameter_performance_record["accuracy"].idxmin(), :])
 
         # TODO: make this the default instead of explicitly checking for name of model object
+
         self._best_model = eval(str(self.model).split("(")[0] + "(**" + str(self.best_params_) + ")").fit(X, y)
 
     def fit_random_search(self, X, y, custom_loss_function=None, n_searches=60, max_runtime=3600,
@@ -763,15 +808,21 @@ class SeqTune:
                 break
             i = i + 1
 
+        hyperparameter_performance_record_parameters_only = hyperparameter_performance_record.drop(
+            ["accuracy", "accuracy_score", "log_loss", "variance", "runtime", "CI_breach",
+             "point_predictor_MSE", "loss_profile_dict"],
+            axis=1)
         self._hyperparameter_performance_record = hyperparameter_performance_record
         if loss_direction == 'direct':
             self.best_score_ = hyperparameter_performance_record["accuracy"].max()
             self.best_params_ = self.combination_row_2_input_dict(
-                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmax(), :])
+                hyperparameter_performance_record_parameters_only.iloc[
+                hyperparameter_performance_record["accuracy"].idxmax(), :])
         elif loss_direction == 'inverse':
             self.best_score_ = hyperparameter_performance_record["accuracy"].min()
             self.best_params_ = self.combination_row_2_input_dict(
-                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmin(), :])
+                hyperparameter_performance_record_parameters_only.iloc[
+                hyperparameter_performance_record["accuracy"].idxmin(), :])
 
         # TODO: make this the default instead of explicitly checking for name of model object
         self._best_model = eval(str(self.model).split("(")[0] + "(**" + str(self.best_params_) + ")").fit(X, y)
