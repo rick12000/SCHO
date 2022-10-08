@@ -41,7 +41,12 @@ class SeqTune:
         self.model = model
         self.random_state = random_state
         self.hyperparameter_space = hyperparameter_space
-        self.n_epochs_used = None
+
+        self._hyperparameter_performance_record = None
+        self.best_params_ = None
+        self.best_score_ = None
+        self._best_model = None
+        self._n_epochs_used = None
 
     def get_default_hyperparameter_space(self):
         if "mlp" in str(self.model).lower():
@@ -259,19 +264,19 @@ class SeqTune:
 
     def build_hyperparameter_logger(self, hyperparameter_combinations):
 
-        hyperparameter_performance_record = hyperparameter_combinations.copy()
-        for i in range(0, hyperparameter_performance_record.shape[1]):
-            hyperparameter_performance_record.iloc[:, i] = np.nan
-        hyperparameter_performance_record["accuracy"] = np.nan
-        hyperparameter_performance_record["accuracy_score"] = np.nan
-        hyperparameter_performance_record["log_loss"] = np.nan
-        hyperparameter_performance_record["variance"] = np.nan
-        hyperparameter_performance_record["runtime"] = np.nan
-        hyperparameter_performance_record["CI_breach"] = np.nan
-        hyperparameter_performance_record["point_predictor_MSE"] = np.nan
-        hyperparameter_performance_record["loss_profile_dict"] = np.nan
+        hyperparameter_performance_record_df = hyperparameter_combinations.copy()
+        for i in range(0, hyperparameter_performance_record_df.shape[1]):
+            hyperparameter_performance_record_df.iloc[:, i] = np.nan
+        hyperparameter_performance_record_df["accuracy"] = np.nan
+        hyperparameter_performance_record_df["accuracy_score"] = np.nan
+        hyperparameter_performance_record_df["log_loss"] = np.nan
+        hyperparameter_performance_record_df["variance"] = np.nan
+        hyperparameter_performance_record_df["runtime"] = np.nan
+        hyperparameter_performance_record_df["CI_breach"] = np.nan
+        hyperparameter_performance_record_df["point_predictor_MSE"] = np.nan
+        hyperparameter_performance_record_df["loss_profile_dict"] = np.nan
 
-        return hyperparameter_performance_record
+        return hyperparameter_performance_record_df
 
     @staticmethod
     def tuplify_network_layer_sizes(
@@ -283,9 +288,46 @@ class SeqTune:
                     layer_tuple = layer_tuple + (int(combination[column_name]),)
         return layer_tuple
 
+    def combination_row_2_input_dict(self, combination_row):
+        if "mlp" in str(self.model).lower():
+            hidden_layers = SeqTune.tuplify_network_layer_sizes(combination_row)
+            solver = SeqTune.solver_mapper(combination_row)
+
+            # TODO: hard coded now, but make it able to accept more inputs from the ocmbination_row, only issue is remember to remove automatically entries that ewre just meant to be used by SCHO, eg. discretization of hidden layers
+            input_dict = {"solver": solver,
+                          "learning_rate_init": combination_row["learning_rate_init"],
+                          "alpha": combination_row["alpha"],
+                          "hidden_layer_sizes": hidden_layers,
+                          "random_state": self.random_state}
+
+        elif "cnn" in str(self.model).lower():
+            solver = SeqTune.solver_mapper(combination_row)
+
+            # TODO: hard coded now, but make it able to accept more inputs from the ocmbination_row, only issue is remember to remove automatically entries that ewre just meant to be used by SCHO, eg. discretization of hidden layers
+            input_dict = {"solver": solver,
+                          "learning_rate": combination_row["learning_rate"],
+                          "drop_out_rate": combination_row["drop_out_rate"],
+                          "layer_1_tuple": (int(combination_row['l1_convolutions']), 3),
+                          "dense_layer_1": int(combination_row['dl1_neurons']),
+                          "layer_2_tuple": (int(combination_row['l2_convolutions']), 3),
+                          "layer_3_tuple": (int(combination_row['l3_convolutions']), 3),
+                          "layer_4_tuple": (int(combination_row['l4_convolutions']), 3),
+                          "dense_layer_2": int(combination_row['dl2_neurons']),
+                          "random_state": self.random_state}
+        else:
+            input_dict = {}
+            combination_row_parameters_only = combination_row.drop(["accuracy", "accuracy_score", "log_loss",
+                                                                    "variance", "runtime", "CI_breach",
+                                                                    "point_predictor_MSE", "loss_profile_dict"])
+            for parameter in combination_row_parameters_only.columns:
+                input_dict[parameter] = combination_row_parameters_only[parameter]
+        return input_dict
+
     def _get_validation_loss(self, combination, X_IS, y_IS, custom_loss_function, prediction_type,
                              validating_framework='train_test_split', train_val_split=0.6, k_fold_splits=None,
                              n_classes=2, presplit_X_y_data_tuple=None):
+
+        combination_input_dict = self.combination_row_2_input_dict(combination)
 
         if validating_framework == 'train_test_split' or validating_framework == 'batch_mean':
             if presplit_X_y_data_tuple is not None:
@@ -299,44 +341,12 @@ class SeqTune:
 
             if "mlp" in str(self.model).lower():
                 if "reg" in str(self.model).lower():
-                    hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                    fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
-                                                learning_rate_init=combination["learning_rate_init"],
-                                                alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                                random_state=self.random_state).fit(X_train, Y_train)
+                    fitted_model = MLPRegressor(**combination_input_dict).fit(X_train, Y_train)
                 elif "clas" in str(self.model).lower():
-                    hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                    fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
-                                                 learning_rate_init=combination["learning_rate_init"],
-                                                 alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                                 random_state=self.random_state).fit(X_train, Y_train)
+                    fitted_model = MLPClassifier(**combination_input_dict).fit(X_train, Y_train)
 
             elif "cnn" in str(self.model).lower():
-                fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
-                                             learning_rate=combination['learning_rate'],
-                                             drop_out_rate=combination['drop_out_rate'],
-                                             # batch_norm=int(combination['batch_norm']),
-                                             layer_1_tuple=(
-                                                 int(combination['l1_convolutions']), 3),
-                                             # int(combination['l1_size'])),
-                                             dense_layer_1=int(combination['dl1_neurons']),
-                                             # epochs=int(combination['epochs']),
-                                             # layer_1_pooling=int(combination["p1_size"]),
-                                             # layer_2_pooling=int(combination["p2_size"]),
-                                             # layer_3_pooling=int(combination["p3_size"]),
-                                             # layer_4_pooling=int(combination["p4_size"]),
-                                             layer_2_tuple=(
-                                                 int(combination['l2_convolutions']), 3),
-                                             # int(combination['l2_size'])),
-                                             layer_3_tuple=(
-                                                 int(combination['l3_convolutions']), 3),
-                                             # int(combination['l3_size'])),
-                                             layer_4_tuple=(
-                                                 int(combination['l4_convolutions']), 3),
-                                             # int(combination['l4_size'])),
-                                             dense_layer_2=int(combination['dl2_neurons']),
-                                             random_state=self.random_state
-                                             )
+                fitted_model = CNNClassifier(**combination_input_dict)
                 fitted_model.fit(X_train, Y_train, X_val, Y_val)
 
             if validating_framework == 'train_test_split':
@@ -390,42 +400,12 @@ class SeqTune:
                 if "mlp" in str(self.model).lower():
                     if "reg" in str(self.model).lower():
                         hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
-                                                    learning_rate_init=combination["learning_rate_init"],
-                                                    alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                                    random_state=self.random_state).fit(X_train, Y_train)
+                        fitted_model = MLPRegressor(**combination_input_dict).fit(X_train, Y_train)
                     elif "clas" in str(self.model).lower():
                         hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                        fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
-                                                     learning_rate_init=combination["learning_rate_init"],
-                                                     alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                                     random_state=self.random_state).fit(X_train, Y_train)
+                        fitted_model = MLPClassifier(**combination_input_dict).fit(X_train, Y_train)
                 elif "cnn" in str(self.model).lower():
-                    fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
-                                                 learning_rate=combination['learning_rate'],
-                                                 drop_out_rate=combination['drop_out_rate'],
-                                                 # batch_norm=int(combination['batch_norm']),
-                                                 layer_1_tuple=(
-                                                     int(combination['l1_convolutions']), 3),
-                                                 # int(combination['l1_size'])),
-                                                 dense_layer_1=int(combination['dl1_neurons']),
-                                                 # epochs=int(combination['epochs']),
-                                                 # layer_1_pooling=int(combination["p1_size"]),
-                                                 # layer_2_pooling=int(combination["p2_size"]),
-                                                 # layer_3_pooling=int(combination["p3_size"]),
-                                                 # layer_4_pooling=int(combination["p4_size"]),
-                                                 layer_2_tuple=(
-                                                     int(combination['l2_convolutions']), 3),
-                                                 # int(combination['l2_size'])),
-                                                 layer_3_tuple=(
-                                                     int(combination['l3_convolutions']), 3),
-                                                 # int(combination['l3_size'])),
-                                                 layer_4_tuple=(
-                                                     int(combination['l4_convolutions']), 3),
-                                                 # int(combination['l4_size'])),
-                                                 dense_layer_2=int(combination['dl2_neurons']),
-                                                 random_state=self.random_state
-                                                 )
+                    fitted_model = CNNClassifier(**combination_input_dict)
                     fitted_model.fit(X_train, Y_train)
                 y_pred = fitted_model.predict(X_val)
                 if prediction_type == "classification" or prediction_type == "nlp_classification":
@@ -448,88 +428,7 @@ class SeqTune:
             final_variance = np.nan
 
         if "cnn" in str(self.model).lower():
-            self.n_epochs_used = fitted_model.n_epochs_used
-
-        # if np.isnan(final_loss):
-        #     final_loss = None
-        # print("out of the box validation function IS loss: ", final_loss)
-
-        return final_loss, final_variance, loss_direction, loss_profile
-
-    def _get_OOS_loss(self, combination, X_IS, y_IS, X_OOS, y_OOS, custom_loss_function, prediction_type,
-                      batch_data=False, n_classes=2):
-        if "mlp" in str(self.model).lower():
-            if "reg" in str(self.model).lower():
-                hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                fitted_model = MLPRegressor(solver=SeqTune.solver_mapper(combination),
-                                            learning_rate_init=combination["learning_rate_init"],
-                                            alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                            random_state=self.random_state).fit(X_IS, y_IS)
-            elif "clas" in str(self.model).lower():
-                hidden_layers = SeqTune.tuplify_network_layer_sizes(combination)
-                fitted_model = MLPClassifier(solver=SeqTune.solver_mapper(combination),
-                                             learning_rate_init=combination["learning_rate_init"],
-                                             alpha=combination["alpha"], hidden_layer_sizes=hidden_layers,
-                                             random_state=self.random_state).fit(X_IS, y_IS)
-        elif "cnn" in str(self.model).lower():
-            fitted_model = CNNClassifier(solver=SeqTune.solver_mapper(combination),
-                                         learning_rate=combination['learning_rate'],
-                                         drop_out_rate=combination['drop_out_rate'],
-                                         # batch_norm=int(combination['batch_norm']),
-                                         layer_1_tuple=(
-                                             int(combination['l1_convolutions']), int(combination['l1_size'])),
-                                         dense_layer_1=int(combination['dl1_neurons']),
-                                         # epochs=int(combination['epochs']),
-                                         # layer_1_pooling=int(combination["p1_size"]),
-                                         # layer_2_pooling=int(combination["p2_size"]),
-                                         # layer_3_pooling=int(combination["p3_size"]),
-                                         # layer_4_pooling=int(combination["p4_size"]),
-                                         layer_2_tuple=(
-                                             int(combination['l2_convolutions']), 3),  # int(combination['l2_size'])),
-                                         layer_3_tuple=(
-                                             int(combination['l3_convolutions']), 3),  # int(combination['l3_size'])),
-                                         layer_4_tuple=(
-                                             int(combination['l4_convolutions']), 3),  # int(combination['l4_size'])),
-                                         dense_layer_2=int(combination['dl2_neurons']),
-                                         random_state=self.random_state
-                                         )
-            fitted_model.fit(X_IS, y_IS)
-
-        if not batch_data:
-            y_pred = fitted_model.predict(X_OOS)
-            if prediction_type == "classification" or prediction_type == "nlp_classification":
-                y_pred_proba = fitted_model.predict_proba(X_OOS)
-            else:
-                y_pred_proba = None
-            loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba,
-                                                y_obs=y_OOS, n_classes=n_classes, prediction_type=prediction_type)
-            final_loss = loss_profile[custom_loss_function]
-            final_variance = np.nan
-            loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
-
-        else:
-            step = 24
-            batch_log = []
-            for i in range(0, len(X_OOS), step):
-                if step + i >= len(X_OOS):
-                    break
-                batch_X = X_OOS[0 + i:step + i, :]
-                batch_y = y_OOS[0 + i:step + i]
-
-                y_pred = fitted_model.predict(batch_X)
-                if prediction_type == "classification" or prediction_type == "nlp_classification":
-                    y_pred_proba = fitted_model.predict_proba(batch_X)
-                else:
-                    y_pred_proba = None
-
-                loss_profile = SeqTune.loss_profile(y_pred=y_pred, y_pred_proba=y_pred_proba, y_obs=batch_y,
-                                                    n_classes=n_classes)
-                batch_loss = loss_profile[custom_loss_function]
-                batch_log.append(batch_loss)
-
-            final_loss = np.mean(np.array(batch_log))
-            final_variance = np.var(np.array(batch_log)) / math.sqrt(len(np.array(batch_log)))
-            loss_direction = SeqTune.loss_metric_direction(custom_loss_function)
+            self._n_epochs_used = fitted_model.n_epochs_used
 
         return final_loss, final_variance, loss_direction, loss_profile
 
@@ -542,7 +441,6 @@ class SeqTune:
             tolerance=20,
             early_stop=60,
             early_timeout=3600,
-            OOS_split=0.3,
             train_val_split=0.6,
             validating_framework='train_test_split',
             CP_scorer='lr_mad',
@@ -550,7 +448,6 @@ class SeqTune:
             confidence_level=0.8,
             conformal_retraining_frequency=5,
             prediction_type="classification",
-            track_out_of_sample_performance=False,
             presplit_X_y_data_tuple=None,
             verbose=False):
         if custom_loss_function is None:
@@ -566,20 +463,8 @@ class SeqTune:
         hyperparameter_tuple_ordered = self.get_hyperparameter_combinations(parameter_grid=parameter_grid)
         hyperparameter_performance_record = self.build_hyperparameter_logger(
             hyperparameter_combinations=hyperparameter_tuple_ordered)
-        OOS_optimal_performance_per_iteration = self.build_hyperparameter_logger(
-            hyperparameter_combinations=hyperparameter_tuple_ordered)
 
         n_classes = len(np.unique(np.array(y)))
-
-        if presplit_X_y_data_tuple is not None:
-            X_IS, y_IS, X_OOS, y_OOS = presplit_X_y_data_tuple
-        elif "nlp" not in prediction_type.lower():
-            # TODO: below set normalization to true for normal data,and false for image data, in future handle automatically
-            X_OOS, y_OOS, X_IS, y_IS = SeqTune.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                    normalize=False, random_state=self.random_state)
-        else:
-            X_OOS, y_OOS, X_IS, y_IS = SeqTune.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                           random_state=self.random_state)
 
         i = 0
         last_retraining_iteration_counter = 0
@@ -600,7 +485,7 @@ class SeqTune:
                     primary_model_runtime_log.resume_runtime()
 
                 validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
-                    combination=combination, X_IS=X_IS, y_IS=y_IS, custom_loss_function=custom_loss_function,
+                    combination=combination, X_IS=X, y_IS=y, custom_loss_function=custom_loss_function,
                     prediction_type=prediction_type,
                     validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes,
                     presplit_X_y_data_tuple=presplit_X_y_data_tuple)
@@ -612,7 +497,7 @@ class SeqTune:
                 elif isinstance(hyperparameter_performance_record["accuracy"].median(), int) or isinstance(
                         hyperparameter_performance_record["accuracy"].median(), float):
                     if prediction_type == "regression" and abs(validation_loss) > abs(
-                            np.median(y_IS)) * 3:
+                            np.median(y_raw)) * 3:
                         blacklisted_combination_df = np.append(blacklisted_combination_df, combination)
                         no_sample_idx.append(row)
                         continue
@@ -749,13 +634,13 @@ class SeqTune:
                                     :]  # NOTE: using the non normalized one now because i need to feed rael parmeters later to the base model
 
                 validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
-                    combination=maximal_parameter, X_IS=X_IS, y_IS=y_IS, custom_loss_function=custom_loss_function,
+                    combination=maximal_parameter, X_IS=X, y_IS=y, custom_loss_function=custom_loss_function,
                     prediction_type=prediction_type,
                     validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes,
                     presplit_X_y_data_tuple=presplit_X_y_data_tuple)
 
                 if np.isnan(validation_loss) or (prediction_type == "regression" and abs(validation_loss) > abs(
-                        np.median(y_IS)) * 3):
+                        np.median(y_raw)) * 3):
                     blacklisted_combination_df = np.append(blacklisted_combination_df, maximal_parameter)
                     # NOTE: here we don't append to no_sample_idx because it's already been appended previously in the maximal_idx section above
                     continue
@@ -786,83 +671,37 @@ class SeqTune:
                     print(
                         f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
 
-            if track_out_of_sample_performance:
-
-                if loss_direction == 'direct':
-                    optimal_idx = (hyperparameter_performance_record['accuracy']).argmax()
-                elif loss_direction == 'inverse':
-                    optimal_idx = (hyperparameter_performance_record['accuracy']).argmin()
-                optimal_parameters = hyperparameter_performance_record.iloc[optimal_idx, :]
-
-                optimal_parameters_conv_modified = optimal_parameters.copy()
-                if "cnn" in str(self.model).lower() and self.n_epochs_used is not None:
-                    optimal_parameters_conv_modified['epochs'] = self.n_epochs_used
-
-                if validating_framework == 'batch_mean':
-                    optimal_loss, optimal_variance, loss_direction, optimal_loss_profile = self._get_OOS_loss(
-                        combination=optimal_parameters_conv_modified,
-                        X_IS=X_IS, y_IS=y_IS, X_OOS=X_OOS,
-                        y_OOS=y_OOS,
-                        custom_loss_function=custom_loss_function,
-                        prediction_type=prediction_type,
-                        batch_data=True,
-                        n_classes=n_classes)
-                else:
-                    # for m in range(0, 3):
-                    optimal_loss, optimal_variance, loss_direction, optimal_loss_profile = self._get_OOS_loss(
-                        combination=optimal_parameters,
-                        X_IS=X_IS, y_IS=y_IS,
-                        X_OOS=X_OOS,
-                        y_OOS=y_OOS,
-                        custom_loss_function=custom_loss_function,
-                        prediction_type=prediction_type,
-                        batch_data=False,
-                        n_classes=n_classes)
-                    # print("repetition test: ", optimal_loss)
-                optimal_parameters_logged = optimal_parameters.copy()
-                optimal_parameters_logged["accuracy"] = optimal_loss
-                optimal_parameters_logged["accuracy_score"] = optimal_loss_profile["accuracy_score"]
-                optimal_parameters_logged["log_loss"] = optimal_loss_profile["log_loss"]
-                optimal_parameters_logged['variance'] = optimal_variance
-                log_time = time.time()
-                log_elapse = log_time - start_time
-                optimal_parameters_logged['runtime'] = log_elapse
-                optimal_parameters_logged['CI_breach'] = np.nan
-                optimal_parameters_logged['point_predictor_MSE'] = np.nan
-                optimal_parameters_logged['loss_profile_dict'] = optimal_loss_profile
-                OOS_optimal_performance_per_iteration.iloc[i, :] = optimal_parameters_logged
-
-                # print("cleaned optimal IS loss: ", hyperparameter_performance_record['accuracy'].iloc[optimal_idx])
-                if verbose:
-                    print(i, log_elapse, "th iteration OOS Accuracy:", optimal_loss)  # , end='\r')
-
             # set tolerance:
             if i > (min_training_iterations + tolerance) and (
-                    round(OOS_optimal_performance_per_iteration["accuracy"].iloc[i - tolerance:i].mean(), 4) == \
-                    round(OOS_optimal_performance_per_iteration["accuracy"].iloc[i], 4)):
-                OOS_optimal_performance_per_iteration = OOS_optimal_performance_per_iteration.iloc[:i, :]
+                    round(hyperparameter_performance_record["accuracy"].iloc[i - tolerance:i].mean(), 4) == \
+                    round(hyperparameter_performance_record["accuracy"].iloc[i], 4)):
                 hyperparameter_performance_record = hyperparameter_performance_record.iloc[:i, :]
-                OOS_optimal_performance_per_iteration["95_CI"] = (
-                        1.645 * OOS_optimal_performance_per_iteration["variance"])
                 hyperparameter_performance_record["95_CI"] = (1.645 * hyperparameter_performance_record["variance"])
                 break
             if (early_stop is not None and i > early_stop) or (log_elapse is not None and log_elapse > early_timeout):
-                OOS_optimal_performance_per_iteration = OOS_optimal_performance_per_iteration.iloc[:i, :]
                 hyperparameter_performance_record = hyperparameter_performance_record.iloc[:i, :]
-                OOS_optimal_performance_per_iteration["95_CI"] = (
-                        1.645 * OOS_optimal_performance_per_iteration["variance"])
                 hyperparameter_performance_record["95_CI"] = (1.645 * hyperparameter_performance_record["variance"])
                 break
 
             i = i + 1
 
-        return OOS_optimal_performance_per_iteration, hyperparameter_performance_record
+        self._hyperparameter_performance_record = hyperparameter_performance_record
+        if loss_direction == 'direct':
+            self.best_score_ = hyperparameter_performance_record["accuracy"].max()
+            self.best_params_ = self.combination_row_2_input_dict(
+                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmax(), :])
+        elif loss_direction == 'inverse':
+            self.best_score_ = hyperparameter_performance_record["accuracy"].min()
+            self.best_params_ = self.combination_row_2_input_dict(
+                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmin(), :])
 
-    def fit_random_search(self, X, y, custom_loss_function=None, n_searches=60, max_runtime=3600, OOS_split=0.3,
+        # TODO: make this the default instead of explicitly checking for name of model object
+        self._best_model = eval(str(self.model).split("(")[0] + "(**" + str(self.best_params_) + ")").fit(X, y)
+
+    def fit_random_search(self, X, y, custom_loss_function=None, n_searches=60, max_runtime=3600,
                           train_val_split=0.6,
                           validating_framework='train_test_split', k_fold_splits=None,
                           prediction_type="classification",
-                          track_out_of_sample_performance=False,
                           presplit_X_y_data_tuple=None,
                           verbose=False):
         if custom_loss_function is None:
@@ -878,20 +717,8 @@ class SeqTune:
         hyperparameter_tuple_ordered = self.get_hyperparameter_combinations(parameter_grid=parameter_grid)
         hyperparameter_performance_record = self.build_hyperparameter_logger(
             hyperparameter_combinations=hyperparameter_tuple_ordered)
-        OOS_optimal_performance_per_iteration = self.build_hyperparameter_logger(
-            hyperparameter_combinations=hyperparameter_tuple_ordered)
 
         n_classes = len(np.unique(np.array(y)))
-
-        if presplit_X_y_data_tuple is not None:
-            X_IS, y_IS, X_OOS, y_OOS = presplit_X_y_data_tuple
-        elif "nlp" not in prediction_type.lower():
-            # TODO: below set normalization to true for normal data,and false for image data, in future handle automatically
-            X_OOS, y_OOS, X_IS, y_IS = SeqTune.train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                    normalize=False, random_state=self.random_state)
-        else:
-            X_OOS, y_OOS, X_IS, y_IS = SeqTune.tf_idf_train_val_test_split(X=X, y=y, OOS_split=OOS_split,
-                                                                           random_state=self.random_state)
 
         i = 0
         start_time = time.time()
@@ -901,7 +728,7 @@ class SeqTune:
 
             validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
                 combination=combination,
-                X_IS=X_IS, y_IS=y_IS,
+                X_IS=X, y_IS=y,
                 custom_loss_function=custom_loss_function,
                 prediction_type=prediction_type,
                 validating_framework=validating_framework,
@@ -914,7 +741,7 @@ class SeqTune:
             elif isinstance(hyperparameter_performance_record["accuracy"].median(), int) or isinstance(
                     hyperparameter_performance_record["accuracy"].median(), float):
                 if prediction_type == "regression" and abs(validation_loss) > abs(
-                        np.median(y_IS)) * 3:
+                        np.median(y_raw)) * 3:
                     continue
 
             logged_combination = combination.copy()
@@ -935,65 +762,27 @@ class SeqTune:
                 print(
                     f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
 
-            if track_out_of_sample_performance:
-
-                if loss_direction == 'direct':
-                    optimal_idx = (hyperparameter_performance_record['accuracy']).argmax()
-                elif loss_direction == 'inverse':
-                    optimal_idx = (hyperparameter_performance_record['accuracy']).argmin()
-                optimal_parameters = hyperparameter_performance_record.iloc[optimal_idx, :]
-
-                optimal_parameters_conv_modified = optimal_parameters.copy()
-                if "cnn" in str(self.model).lower() and self.n_epochs_used is not None:
-                    optimal_parameters_conv_modified['epochs'] = self.n_epochs_used
-
-                if validating_framework == 'batch_mean':
-                    optimal_loss, optimal_variance, loss_direction, optimal_loss_profile = self._get_OOS_loss(
-                        combination=optimal_parameters,
-                        X_IS=X_IS, y_IS=y_IS,
-                        X_OOS=X_OOS,
-                        y_OOS=y_OOS,
-                        custom_loss_function=custom_loss_function,
-                        prediction_type=prediction_type,
-                        batch_data=True,
-                        n_classes=n_classes)
-                else:
-                    optimal_loss, optimal_variance, loss_direction, optimal_loss_profile = self._get_OOS_loss(
-                        combination=optimal_parameters,
-                        X_IS=X_IS, y_IS=y_IS,
-                        X_OOS=X_OOS,
-                        y_OOS=y_OOS,
-                        custom_loss_function=custom_loss_function,
-                        prediction_type=prediction_type,
-                        batch_data=False,
-                        n_classes=n_classes)
-
-                optimal_parameters_logged = optimal_parameters.copy()
-                optimal_parameters_logged["accuracy"] = optimal_loss
-                optimal_parameters_logged["accuracy_score"] = optimal_loss_profile["accuracy_score"]
-                optimal_parameters_logged["log_loss"] = optimal_loss_profile["log_loss"]
-                optimal_parameters_logged['variance'] = optimal_variance
-                log_time = time.time()
-                log_elapse = log_time - start_time
-                optimal_parameters_logged['runtime'] = log_elapse
-                optimal_parameters_logged['CI_breach'] = np.nan
-                optimal_parameters_logged['point_predictor_MSE'] = np.nan
-                optimal_parameters_logged['loss_profile_dict'] = optimal_loss_profile
-                OOS_optimal_performance_per_iteration.iloc[i, :] = optimal_parameters_logged
-
-                if verbose:
-                    print(i, log_elapse, "th iteration OOS Accuracy:", optimal_loss, end='\r')
-
             if i > n_searches or (log_elapse is not None and log_elapse > max_runtime):
-                OOS_optimal_performance_per_iteration = OOS_optimal_performance_per_iteration.iloc[:i, :]
                 hyperparameter_performance_record = hyperparameter_performance_record.iloc[:i, :]
-                OOS_optimal_performance_per_iteration["95_CI"] = (
-                        1.645 * OOS_optimal_performance_per_iteration["variance"])
                 hyperparameter_performance_record["95_CI"] = (1.645 * hyperparameter_performance_record["variance"])
                 break
             i = i + 1
 
-        return OOS_optimal_performance_per_iteration, hyperparameter_performance_record
+        self._hyperparameter_performance_record = hyperparameter_performance_record
+        if loss_direction == 'direct':
+            self.best_score_ = hyperparameter_performance_record["accuracy"].max()
+            self.best_params_ = self.combination_row_2_input_dict(
+                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmax(), :])
+        elif loss_direction == 'inverse':
+            self.best_score_ = hyperparameter_performance_record["accuracy"].min()
+            self.best_params_ = self.combination_row_2_input_dict(
+                hyperparameter_performance_record.iloc[hyperparameter_performance_record["accuracy"].idxmin(), :])
+
+        # TODO: make this the default instead of explicitly checking for name of model object
+        self._best_model = eval(str(self.model).split("(")[0] + "(**" + str(self.best_params_) + ")").fit(X, y)
+
+    def predict(self, X):
+        return self._best_model.predict(X)
 
     @staticmethod
     def solver_mapper(hyperparameter_tuple_row):
