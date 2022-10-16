@@ -37,22 +37,16 @@ class Analytics:
         cross_model_log = cross_model_log.drop(["loss_profile_dict"], axis=1)
         cross_model_log = cross_model_log.reset_index(drop=True)
 
-        aggregation = {"runtime": ["max", "count"], "accuracy": [Analytics.get_last, "mean"],
+        aggregation = {"runtime": ["max", "count"],
+                       "accuracy": ["mean", "max", "min"],
+                       "accuracy_score": ["mean", "max"],
+                       "log_loss": ["mean", "min"],
                        "CI_breach": "mean"}
         results_table = cross_model_log.groupby(["secondary_model", "cp_scorer"],
                                                 as_index=False).agg(
             aggregation)
         results_table.columns = [''.join(col).strip() for col in results_table.columns.values]
         results_table["runtime_per_iter"] = results_table["runtimemax"] / results_table["runtimecount"]
-        adjunct_results_table = \
-            cross_model_log.iloc[
-            cross_model_log.groupby(["secondary_model", "cp_scorer"]).accuracy.idxmax().fillna(
-                0).values, :][
-                # fillna with 0 is not good, it only applies to when OOS is not selected as an option in train test split and this returns Nans for the OOS entries, replacing with 0 means arbitrarily selecting the 0th row instead of the idxmax for the OOS data, even though this hould correspond to Nan anyway which is fine
-                ["secondary_model", "cp_scorer", "accuracy"]]
-        adjunct_results_table = adjunct_results_table.rename(columns={"accuracy": "accuracymax"})
-        results_table = pd.merge(results_table, adjunct_results_table, how='left',
-                                 on=["secondary_model", "cp_scorer"])
         results_table = results_table.drop(["runtimemax"], axis=1)
 
         return results_table

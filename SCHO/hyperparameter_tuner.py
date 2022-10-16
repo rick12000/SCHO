@@ -82,8 +82,8 @@ class SeqTune:
                               }
 
         elif "forest" in str(self.model).lower():
-            n_estimators_list = [10, 30, 50, 80, 100, 150, 200, 300, 400]
-            min_samples_split_list = [2, 5, 10]
+            n_estimators_list = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150, 200, 250, 300, 400, 500, 600, 700]
+            min_samples_split_list = [2, 5, 10, 20, 30]
             # max_features_list = ["sqrt", "log2", "auto"]
 
             parameter_dict = {'n_estimators': n_estimators_list,
@@ -153,7 +153,7 @@ class SeqTune:
 
         elif "mlp" in str(self.model).lower() or "cnn" in str(self.model).lower():
 
-            for i in tqdm(range(0, 100000)):
+            for i in tqdm(range(0, 10000)):
                 parameter_combination = []
                 parameter_combination_columns = []
                 for key in parameter_grid.keys():  # NOTE: number of layers parameter must be ordered before layer size in the param dict for this to work
@@ -311,11 +311,11 @@ class SeqTune:
 
     @staticmethod
     def tuplify_network_layer_sizes(
-            combination):  # NOTE: assumes column names are sorted from layer 1 to layer N, otherwise will not create ordered list
+            combination):  # TODO: assumes column names are sorted from layer 1 to layer N, otherwise will not create ordered list, change to reduce this vulnerability
         layer_tuple = ()
         for column_name in list(combination.index):
-            if "layer" in column_name.lower():
-                if combination[column_name] != 0:
+            if "layer_" in column_name.lower():
+                if int(combination[column_name]) != 0:
                     layer_tuple = layer_tuple + (int(combination[column_name]),)
         return layer_tuple
 
@@ -325,19 +325,19 @@ class SeqTune:
             solver = SeqTune.solver_mapper(combination_row)
 
             # TODO: hard coded now, but make it able to accept more inputs from the ocmbination_row, only issue is remember to remove automatically entries that ewre just meant to be used by SCHO, eg. discretization of hidden layers
-            input_dict = {"solver": solver,
-                          "learning_rate_init": combination_row["learning_rate_init"],
-                          "alpha": combination_row["alpha"],
-                          "hidden_layer_sizes": hidden_layers,
+            input_dict = {"solver": try_numeric(solver),
+                          "learning_rate_init": try_numeric(combination_row["learning_rate_init"]),
+                          "alpha": try_numeric(combination_row["alpha"]),
+                          "hidden_layer_sizes": try_numeric(hidden_layers),
                           "random_state": self.random_state}
 
         elif "cnn" in str(self.model).lower():
             solver = SeqTune.solver_mapper(combination_row)
 
             # TODO: hard coded now, but make it able to accept more inputs from the ocmbination_row, only issue is remember to remove automatically entries that ewre just meant to be used by SCHO, eg. discretization of hidden layers
-            input_dict = {"solver": solver,
-                          "learning_rate": combination_row["learning_rate"],
-                          "drop_out_rate": combination_row["drop_out_rate"],
+            input_dict = {"solver": try_numeric(solver),
+                          "learning_rate": try_numeric(combination_row["learning_rate"]),
+                          "drop_out_rate": try_numeric(combination_row["drop_out_rate"]),
                           "layer_1_tuple": (int(combination_row['l1_convolutions']), 3),
                           "dense_layer_1": int(combination_row['dl1_neurons']),
                           "layer_2_tuple": (int(combination_row['l2_convolutions']), 3),
@@ -351,12 +351,13 @@ class SeqTune:
             combination_df.columns = ["parameter", "value"]
             for m in range(0, len(combination_df)):
                 try:
-                    value = int(combination_df["value"].iloc[m])
+                    if combination_df["value"].iloc[m] % 1 == 0:
+                        value = int(combination_df["value"].iloc[m])
                 except:
                     try:
                         value = float(combination_df["value"].iloc[m])
                     except:
-                        value = str(combination_df["value"].iloc[m])
+                        value = combination_df["value"].iloc[m]
                 input_dict[combination_df["parameter"].iloc[m]] = value
         return input_dict
 
@@ -530,7 +531,7 @@ class SeqTune:
                 elif isinstance(hyperparameter_performance_record["accuracy"].median(), int) or isinstance(
                         hyperparameter_performance_record["accuracy"].median(), float):
                     if prediction_type == "regression" and abs(validation_loss) > abs(
-                            np.median(y_raw)) * 3:
+                            np.median(y)) * 3:
                         blacklisted_combination_df = np.append(blacklisted_combination_df, combination)
                         no_sample_idx.append(row)
                         continue
@@ -886,3 +887,14 @@ class OutlierRemover:
             y_outlier_cleaned = y[idx_keep]
 
         return X_outlier_cleaned, y_outlier_cleaned
+
+
+
+def try_numeric(value):
+    try:
+        if value % 1 == 0:
+            return int(value)
+        else:
+            return float(value)
+    except:
+        return value

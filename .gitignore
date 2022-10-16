@@ -5,14 +5,15 @@ datasets_offline/
 saved_logs/
 venv/
 .idea/
-temp.py
+default_config.py
 __pycache__/
 ~/
 cifar_config.py
 digits_config.py
 fmnist_config.py
 imdb_config.py
-run.py
+legacy/run.py
 PlotEngine.py
 NLPhelper.py
 DataHandling.py
+legacy/

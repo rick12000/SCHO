@@ -16,20 +16,12 @@ class PlotHelper:
     marker_type_list = ["+", "x", "D", "o", "s", "h", "P"]
 
     @staticmethod
-    def compare_search_frameworks(framework_log_1, framework_log_2):
-        joint_log = pd.merge(framework_log_1, framework_log_2, right_index=True, left_index=True)
-        joint_log = joint_log.rename(columns={"accuracy_x": "Conformal Random Forest", "accuracy_y": "Random Search"})
-        joint_log[["Conformal Random Forest", "Random Search"]].plot()
-        # plt.grid()
-        plt.xlabel("Number of Iterations")
-        plt.ylabel("Loss")
-        plt.legend(loc="lower right")
-        plt.savefig('AccuracyPlot.png')
-        plt.show()
-
-    @staticmethod
-    def plot_loss_surface_cross_section(x_axis_variable, y_axis_variable,
-                                        z_axis_variable, loss_surface_log, hypermodel_log, min_z_level=None):
+    def plot_loss_surface_cross_section(x_axis_variable,
+                                        y_axis_variable,
+                                        z_axis_variable,
+                                        loss_surface_log,
+                                        hypermodel_log,
+                                        min_z_level=None):
 
         ax = plt.axes(projection='3d')
         loss_surface_log_light = loss_surface_log.drop(["hidden_layer_sizes", "solver"], axis=1)
@@ -59,30 +51,13 @@ class PlotHelper:
         plt.show()
 
     @staticmethod
-    def plot_regret(loss_surface_log, hypermodel_log, secondary_model_log):
-        max_accuracy = np.max(np.array(loss_surface_log["accuracy"]))
-        joint_log = pd.merge(hypermodel_log, secondary_model_log, right_index=True, left_index=True)
-        joint_log["regret_x"] = max_accuracy - joint_log["accuracy_x"]
-        joint_log["regret_y"] = max_accuracy - joint_log["accuracy_y"]
-        joint_log[["regret_x", "regret_y"]].plot()
-        # plt.grid()
-        plt.savefig('RegretPlot.png')
-        plt.show()
-
-    @staticmethod
-    def plot_indexed_acquisition_function(full_parameter_space_predictions, confidence_intervals):
-        predictions = np.array(full_parameter_space_predictions)
-        index = np.arange(len(predictions))
-        plt.plot(index, predictions)
-        ci = np.array(confidence_intervals)
-        plt.fill_between(index, (predictions - ci), (predictions + ci), color='blue', alpha=0.1)
-        plt.pause(0.05)
-        plt.show()
-        plt.clf()
-
-    @staticmethod
-    def plot_sorted_conformal_variance(baseline_accuracies, CP_intervals, CP_scorer, hyper_reg_model, confidence_level,
-                                       visually_undersample=True, undersampled_size=500):
+    def plot_sorted_conformal_variance(baseline_accuracies,
+                                       CP_intervals,
+                                       CP_scorer,
+                                       hyper_reg_model,
+                                       confidence_level,
+                                       visually_undersample=True,
+                                       undersampled_size=500):
         if visually_undersample and len(baseline_accuracies) > undersampled_size:
             plottable_baseline_accuracies = baseline_accuracies[
                 np.random.choice(len(baseline_accuracies), undersampled_size, replace=False)]
@@ -107,21 +82,21 @@ class PlotHelper:
         plt.clf()
 
     @staticmethod
-    def plot_search_performance_tri_chart(logging_data,
-                                          min_aggregation=False,
-                                          max_aggregation=False,
-                                          plot_confidence=False,
-                                          plot_over_time=False,
-                                          avg_aggregation=False,
-                                          moving_average_window=15,
-                                          filer=None,
-                                          show=True,
-                                          chart_indexing_variable='cp_scorer',
-                                          line_indexing_variable='secondary_model',
-                                          outcome_variable='accuracy',
-                                          plot_point_markers=False,
-                                          bounding_array=None,
-                                          y_label=None):
+    def plot_multi_chart_figure(logging_data,
+                                min_aggregation=False,
+                                max_aggregation=False,
+                                plot_confidence=False,
+                                plot_over_time=False,
+                                avg_aggregation=False,
+                                moving_average_window=15,
+                                filer=None,
+                                show=True,
+                                chart_indexing_variable='cp_scorer',
+                                line_indexing_variable='secondary_model',
+                                outcome_variable='accuracy',
+                                plot_point_markers=False,
+                                bounding_array=None,
+                                y_label=None):
         plt.clf()
         plt.figure(figsize=(17, 8))
         letter_enum = ["a", "b", "c", "d", "e", "f", "g"]
@@ -250,157 +225,180 @@ class PlotHelper:
             plt.savefig(
                 filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name + "/" + str(
                     outcome_variable) + str(
-                    CP_scorer) + "-" + str(
+                    CP_scorer) + "-" + str(plot_over_time) + "-" + str(
                     aggregation_description) + "-" + time_descriptor + "-" + 'cross_model_plot.png', dpi=my_dpi * 1.5)
         if show:
             plt.show()
 
+        plt.close()
+
     @staticmethod
-    def plot_single_scorer_datasets(dataset_names,
-                                    CP_scorer,
-                                    min_aggregation=False,
-                                    max_aggregation=False,
-                                    plot_confidence=False,
-                                    plot_over_time=False,
-                                    avg_aggregation=False,
-                                    moving_average_window=15,
-                                    show=True):
+    def plot_performance_variance_breach_trifecta(logging_data, plot_over_time):
         plt.clf()
-        plt.figure(figsize=(27, 8))
+        plt.figure(figsize=(17, 8))
+        mycolorpalette = ['tab:pink', 'tab:purple', 'tab:red']
 
-        cross_dataset_cross_model_log = pd.DataFrame()
-        for m in range(0, len(dataset_names)):
-            dataset_name = dataset_names[m]
-            filer = Filing(
-                data_folder_name="data",
-                plots_folder_name="plots",
-                results_folder_name="tables_and_results",
-                dataset_name=dataset_name)
+        logging_data["secondary_model_confidence_proxy"] = logging_data["secondary_model"].str.replace(" Predictor",
+                                                                                                       "") + " " + (
+                                                                   logging_data["confidence_level"].astype(
+                                                                       float) * 100).astype(int).astype(
+            str) + "% Confidence"
+        logging_data.loc[logging_data["secondary_model"] == "RS", ["secondary_model_confidence_proxy"]] = "RS"
 
-            cross_model_OOS_log = filer.load_dataframe(df_filename="OOS_log.csv")
-            cross_model_OOS_log["sample_category"] = "OOS"
-            cross_model_IS_log = filer.load_dataframe(df_filename="IS_log.csv")
-            cross_model_IS_log["sample_category"] = "IS"
+        # PLOT 1:
+        outcome_variable = "accuracy_score"
+        bounding_array = None
 
-            # TODO: TEMP, TOGGLE ON AND OFF
-            cross_model_OOS_log["secondary_model"] = cross_model_OOS_log["secondary_model"].str.replace(
-                "Dense Neural Network", "DNN Predictor")
-            cross_model_OOS_log["secondary_model"] = cross_model_OOS_log["secondary_model"].str.replace("KNN",
-                                                                                                        "KNN Predictor")
-            cross_model_OOS_log["secondary_model"] = cross_model_OOS_log["secondary_model"].str.replace("Random Search",
-                                                                                                        "RS")
-            cross_model_OOS_log["secondary_model"] = cross_model_OOS_log["secondary_model"].str.replace("Random Forest",
-                                                                                                        "RF Predictor")
-            cross_model_IS_log["secondary_model"] = cross_model_IS_log["secondary_model"].str.replace(
-                "Dense Neural Network", "DNN Predictor")
-            cross_model_IS_log["secondary_model"] = cross_model_IS_log["secondary_model"].str.replace("KNN",
-                                                                                                      "KNN Predictor")
-            cross_model_IS_log["secondary_model"] = cross_model_IS_log["secondary_model"].str.replace("Random Search",
-                                                                                                      "RS")
-            cross_model_IS_log["secondary_model"] = cross_model_IS_log["secondary_model"].str.replace("Random Forest",
-                                                                                                      "RF Predictor")
-            # END OF TEMP TOGGLE
+        plot_index = 1
+        color_palette_index = 0
+        for secondary_model in logging_data["secondary_model_confidence_proxy"].unique():
 
-            cross_model_log = pd.concat([cross_model_OOS_log, cross_model_IS_log], axis=0)
-            cross_dataset_cross_model_log = cross_dataset_cross_model_log.append(cross_model_log)
+            plt.subplot(1, 3, plot_index)
 
-        # per plot
-        plot_index = 0
-        for dataset in cross_dataset_cross_model_log["dataset"].unique():
-            plot_index = plot_index + 1
-            color_palette_index = 0
-            for secondary_model in cross_dataset_cross_model_log["secondary_model"].unique():
-                plt.subplot(1, len(cross_dataset_cross_model_log["dataset"].unique()), plot_index)
+            model_logging_data = logging_data[
+                (logging_data["secondary_model_confidence_proxy"] == secondary_model)].reset_index(
+                drop=True)
+            predictions = np.array(model_logging_data[accuracy_metric])
 
-                model_logging_data = cross_dataset_cross_model_log[
-                    (cross_dataset_cross_model_log["secondary_model"] == secondary_model) & (
-                            cross_dataset_cross_model_log["dataset"] == dataset) & (
-                            cross_dataset_cross_model_log["cp_scorer"] == CP_scorer) & (
-                            cross_dataset_cross_model_log["sample_category"] == "IS")].reset_index(drop=True)
+            # max:
+            for i in range(0, len(predictions)):
+                if i == 0:
+                    predictions[i] = predictions[i]
+                else:
+                    predictions[i] = max(predictions[0:i + 1])
+                    if predictions[i] != predictions[i - 1]:
+                        turning_index = i
+                    try:
+                        ci[i] = ci[turning_index]
+                    except:
+                        pass
 
-                predictions = np.array(model_logging_data['accuracy'])
+            if plot_over_time:
                 minutes = np.array(model_logging_data["runtime"] / 60)
-                # ci = np.array(model_logging_data['95_CI'])
-                if min_aggregation:
-                    for i in range(0, len(predictions)):
-                        if i == 0:
-                            predictions[i] = predictions[i]
-                        else:
-                            predictions[i] = min(predictions[0:i + 1])
-                            if predictions[i] != predictions[i - 1]:
-                                turning_index = i
-                            try:
-                                ci[i] = ci[turning_index]
-                            except:
-                                pass
-                if max_aggregation:
-                    for i in range(0, len(predictions)):
-                        if i == 0:
-                            predictions[i] = predictions[i]
-                        else:
-                            predictions[i] = max(predictions[0:i + 1])
-                            if predictions[i] != predictions[i - 1]:
-                                turning_index = i
-                            try:
-                                ci[i] = ci[turning_index]
-                            except:
-                                pass
+                plt.plot(minutes, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            else:
+                index = np.arange(len(predictions))
+                plt.plot(index, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            if plot_over_time:
+                plt.xlabel("Minutes", fontsize=21)
+            else:
+                plt.xlabel("Number of Iterations", fontsize=21)
 
-                if avg_aggregation:
-                    for i in range(0, len(predictions) - moving_average_window - 1):
-                        if i == 0:
-                            predictions[i] = predictions[i]
-                        else:
-                            predictions[i] = np.nanmean(predictions[i:i + moving_average_window])
-                    predictions = predictions[:-moving_average_window - 1]
-                    minutes = minutes[:-moving_average_window - 1]
-                if plot_over_time:
-                    plt.plot(minutes, predictions, color=PlotHelper.color_palette[color_palette_index],
-                             label=str(secondary_model),
-                             linewidth=2)
+            plt.ylabel("Best Validation Accuracy", fontsize=21)
+
+            plt.legend(loc="lower right", prop={'size': 19})
+            plt.xticks(fontsize=18)
+            plt.yticks(fontsize=18)
+
+            if bounding_array is not None:
+                plt.ylim(bounding_array)
+
+            color_palette_index = color_palette_index + 1
+
+        # PLOT 2:
+        avg_aggregation = True
+        moving_average_window = 400
+        bounding_array = [-0.1, 0.35]  # 0.85]
+
+        plot_index = 2
+        color_palette_index = 0
+        for secondary_model in logging_data["secondary_model_confidence_proxy"].unique():
+
+            plt.subplot(1, 3, plot_index)
+
+            model_logging_data = logging_data[
+                (logging_data["secondary_model_confidence_proxy"] == secondary_model)].reset_index(
+                drop=True)
+            predictions = np.array(model_logging_data[outcome_variable])
+
+            # avg:
+            for i in range(0, len(predictions)):
+                if i == 0:
+                    predictions[i] = predictions[i]
+                elif i < len(predictions) - moving_average_window - 1:
+                    predictions[i] = np.std(predictions[i:i + moving_average_window])
                 else:
-                    index = np.arange(len(predictions))
-                    plt.plot(index, predictions, color=PlotHelper.color_palette[color_palette_index],
-                             label=str(secondary_model),
-                             linewidth=2)
-                if plot_confidence and plot_over_time:
-                    plt.fill_between(minutes, (predictions - ci), (predictions + ci), alpha=0.35,
-                                     color=PlotHelper.color_palette[color_palette_index])
-                elif plot_confidence and not plot_over_time:
-                    plt.fill_between(index, (predictions - ci), (predictions + ci), alpha=0.35,
-                                     color=PlotHelper.color_palette[color_palette_index])
+                    predictions[i] = np.nan
+            if plot_over_time:
+                minutes = np.array(model_logging_data["runtime"] / 60)
+                plt.plot(minutes, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            else:
+                index = np.arange(len(predictions))
+                plt.plot(index, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            if plot_over_time:
+                plt.xlabel("Minutes", fontsize=21)
+            else:
+                plt.xlabel("Number of Iterations", fontsize=21)
 
-                if plot_over_time:
-                    time_descriptor = "x-axis-minutes"
-                    plt.xlabel("Minutes", fontsize=29)
+            plt.ylabel("Validation Accuracy: 400 Iteration Rolling Standard Deviation", fontsize=21)
+
+            plt.legend(loc="lower right", prop={'size': 19})
+            plt.xticks(fontsize=18)
+            plt.yticks(fontsize=18)
+
+            if bounding_array is not None:
+                plt.ylim(bounding_array)
+
+            color_palette_index = color_palette_index + 1
+
+        # PLOT 3:
+        bounding_array = [-0.1, 0.8]  # 0.65]
+        outcome_variable = "CI_breach"
+        logging_data = logging_data[logging_data["secondary_model"] != "RS"]
+
+        plot_index = 3
+        color_palette_index = 0
+        for secondary_model in logging_data["secondary_model_confidence_proxy"].unique():
+
+            plt.subplot(1, 3, plot_index)
+
+            model_logging_data = logging_data[
+                (logging_data["secondary_model_confidence_proxy"] == secondary_model)].reset_index(
+                drop=True)
+            predictions = np.array(model_logging_data[outcome_variable])
+
+            # avg:
+            for i in range(0, len(predictions)):
+                if i == 0:
+                    predictions[i] = predictions[i]
+                elif i < len(predictions) - moving_average_window - 1:
+                    predictions[i] = np.nanmean(predictions[i:i + moving_average_window])
                 else:
-                    time_descriptor = "x-axis-iterations"
-                    plt.xlabel("Number of Iterations", fontsize=29)
+                    predictions[i] = np.nan
 
-                if min_aggregation:
-                    plt.ylabel("Minimum Log Loss", fontsize=29)
-                elif max_aggregation:
-                    plt.ylabel("Best Validation Accuracy", fontsize=29)
-                elif avg_aggregation:
-                    plt.ylabel("Moving Average Accuracy", fontsize=29)
-                else:
-                    plt.ylabel("Minimum Average Log Loss", fontsize=29)
+            if plot_over_time:
+                minutes = np.array(model_logging_data["runtime"] / 60)
+                plt.plot(minutes, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            else:
+                index = np.arange(len(predictions))
+                plt.plot(index, predictions, color=mycolorpalette[color_palette_index],
+                         label=str(secondary_model),
+                         linewidth=3)
+            if plot_over_time:
+                plt.xlabel("Minutes", fontsize=21)
+            else:
+                plt.xlabel("Number of Iterations", fontsize=21)
 
-                plt.legend(loc="lower right", prop={'size': 22})
-                plt.xticks(fontsize=25)
-                plt.yticks(fontsize=25)
-                # plt.ylim([0.05, 0.3])
+            plt.ylabel("CI Breach Rate: 400 Iteration Rolling Mean", fontsize=21)
 
-                color_palette_index = color_palette_index + 1
+            plt.legend(loc="lower right", prop={'size': 19})
+            plt.xticks(fontsize=18)
+            plt.yticks(fontsize=18)
 
-            # plt.grid(linestyle='--')
+            if bounding_array is not None:
+                plt.ylim(bounding_array)
 
-        if min_aggregation:
-            aggregation_description = "minimum_aggregation"
-        elif avg_aggregation:
-            aggregation_description = "average_aggregation"
-        else:
-            aggregation_description = "no_aggregation"
+            color_palette_index = color_palette_index + 1
 
         my_dpi = 96
         # plt.figure(figsize=(800 / my_dpi, 800 / my_dpi), dpi=my_dpi)
@@ -410,134 +408,5 @@ class PlotHelper:
                     filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name):
                 os.makedirs(filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name)
             plt.savefig(
-                filer.output_parent_folder_path + "/" + "cross_model_plots" + "/" + filer.plots_folder_name + "/" + ''.join(
-                    dataset_names) + "-" + str(
-                    aggregation_description) + "-" + time_descriptor + "-" + 'cross_model_plot.png', dpi=my_dpi * 1.5)
-        if show:
-            plt.show()
-
-    @staticmethod
-    def plot_IS_vs_OOS_search_performance_single_chart_per_dataset(cross_model_cross_dataset_logging_data,
-                                                                   secondary_model,
-                                                                   CP_scorer,
-                                                                   min_aggregation=False,
-                                                                   max_aggregation=False,
-                                                                   plot_confidence=False,
-                                                                   plot_over_time=False,
-                                                                   avg_aggregation=False,
-                                                                   moving_average_window=15,
-                                                                   filer=None,
-                                                                   show=True):
-
-        plt.clf()
-
-        n_subplots = len(cross_model_cross_dataset_logging_data["dataset"].unique())
-        print(n_subplots)
-        print(cross_model_cross_dataset_logging_data["dataset"].unique())
-
-        # per plot
-        plot_index = 0
-        for dataset_name in cross_model_cross_dataset_logging_data["dataset"].unique():
-            plot_index = plot_index + 1
-            color_palette_index = 0
-
-            dataset_filtered_logging_data = cross_model_cross_dataset_logging_data[
-                cross_model_cross_dataset_logging_data["dataset"] == dataset_name]
-            secondary_model_list = [secondary_model, "Random Search"]
-            for secondary_model in secondary_model_list:
-                if secondary_model == "Random Search":
-                    linestyle_selection = "-."
-                else:
-                    linestyle_selection = "-"
-
-                for sample_category in ["IS", "OOS"]:
-                    plt.subplot(1, n_subplots, plot_index)
-
-                    model_logging_data = dataset_filtered_logging_data[
-                        (dataset_filtered_logging_data["secondary_model"] == secondary_model) & (
-                                dataset_filtered_logging_data["cp_scorer"] == CP_scorer) & (
-                                dataset_filtered_logging_data["sample_category"] == sample_category)].reset_index(
-                        drop=True)
-                    predictions = np.array(model_logging_data['accuracy'])
-                    # ci = np.array(model_logging_data['95_CI'])
-                    if sample_category == "IS" and min_aggregation:
-                        for i in range(0, len(predictions)):
-                            if i == 0:
-                                predictions[i] = predictions[i]
-                            else:
-                                predictions[i] = min(predictions[0:i + 1])
-                                if predictions[i] != predictions[i - 1]:
-                                    turning_index = i
-                                try:
-                                    ci[i] = ci[turning_index]
-                                except:
-                                    pass
-                    if sample_category == "IS" and max_aggregation:
-                        for i in range(0, len(predictions)):
-                            if i == 0:
-                                predictions[i] = predictions[i]
-                            else:
-                                predictions[i] = max(predictions[0:i + 1])
-                                if predictions[i] != predictions[i - 1]:
-                                    turning_index = i
-                                try:
-                                    ci[i] = ci[turning_index]
-                                except:
-                                    pass
-
-                    if sample_category == "IS" and avg_aggregation:
-                        for i in range(0, len(predictions) - moving_average_window - 1):
-                            if i == 0:
-                                predictions[i] = predictions[i]
-                            else:
-                                predictions[i] = np.nanmean(predictions[i:i + moving_average_window])
-                    if plot_over_time:
-                        minutes = np.array(model_logging_data["runtime"] / 60)
-                        plt.plot(minutes, predictions, color=PlotHelper.color_palette[color_palette_index],
-                                 label=str(secondary_model) + " " + str(sample_category), linestyle=linestyle_selection)
-                    else:
-                        index = np.arange(len(predictions))
-                        plt.plot(index, predictions, color=PlotHelper.color_palette[color_palette_index],
-                                 label=str(secondary_model) + " " + str(sample_category), linestyle=linestyle_selection)
-                    if plot_confidence and plot_over_time:
-                        plt.fill_between(minutes, (predictions - ci), (predictions + ci), alpha=0.35,
-                                         color=PlotHelper.color_palette[color_palette_index])
-                    elif plot_confidence and not plot_over_time:
-                        plt.fill_between(index, (predictions - ci), (predictions + ci), alpha=0.35,
-                                         color=PlotHelper.color_palette[color_palette_index])
-
-                    if plot_over_time:
-                        time_descriptor = "x-axis-minutes"
-                        plt.xlabel("Minutes")
-                    else:
-                        time_descriptor = "x-axis-iterations"
-                        plt.xlabel("Number of Iterations")
-                    plt.ylabel("Log Loss")
-                    plt.legend(loc="lower right", prop={'size': 7})
-                    # plt.ylim([0, 0.5])
-
-                    color_palette_index = color_palette_index + 1
-
-                # plt.grid(linestyle='--')
-
-            if min_aggregation:
-                aggregation_description = "minimum_aggregation"
-            elif avg_aggregation:
-                aggregation_description = "average_aggregation"
-            else:
-                aggregation_description = "no_aggregation"
-
-            my_dpi = 96
-            # plt.tight_layout()
-            if filer is not None:
-                if not os.path.exists(
-                        filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name):
-                    os.makedirs(
-                        filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name)
-                plt.savefig(
-                    filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name + "/" + str(
-                        CP_scorer) + "-" + str(
-                        aggregation_description) + "-" + time_descriptor + "-" + 'cross_dataset_plot.png',
-                    dpi=my_dpi / 2)
-            if show:
-                plt.show()
+                filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name + "/" + 'tri_confidence_chart.png',
+                dpi=my_dpi * 1.5)
