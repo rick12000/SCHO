@@ -17,8 +17,6 @@ random.seed(1234)
 np.random.seed(1234)
 from sklearn import metrics
 from sklearn.model_selection import KFold
-from sklearn.neural_network import MLPClassifier
-from sklearn.ensemble import RandomForestClassifier
 import tensorflow as tf
 
 session_conf = tf.compat.v1.ConfigProto(intra_op_parallelism_threads=1, inter_op_parallelism_threads=1)
@@ -31,10 +29,11 @@ from sklearn.preprocessing import StandardScaler
 from SCHO.conformal_methods import Conformal
 from SCHO.utils.runtime_eval import TimeLogger
 from SCHO.utils.runtime_eval import ConformalRuntimeOptimizer
-from NLPhelper import NLPEncoder
+from SCHO.utils.nlp_helper import NLPEncoder
 from SCHO.wrappers.keras_wrappers import CNNClassifier
-from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPClassifier
 from tqdm import tqdm
+
 
 
 class SeqTune:
@@ -153,7 +152,7 @@ class SeqTune:
 
         elif "mlp" in str(self.model).lower() or "cnn" in str(self.model).lower():
 
-            for i in tqdm(range(0, 10000)):
+            for i in tqdm(range(0, 200000)):
                 parameter_combination = []
                 parameter_combination_columns = []
                 for key in parameter_grid.keys():  # NOTE: number of layers parameter must be ordered before layer size in the param dict for this to work
@@ -257,7 +256,7 @@ class SeqTune:
             entropy = np.nan
             mse = np.sum((y_obs - y_pred) ** 2) / len(y_obs)
             rmse = math.sqrt(mse)
-        elif prediction_type == "classification" or prediction_type == "nlp_classification":
+        elif prediction_type == "classification":
             try:
                 if y_pred_proba.shape[1] == 2:
                     entropy = metrics.log_loss(y_obs, y_pred_proba[:, 1])
@@ -387,7 +386,7 @@ class SeqTune:
 
             if validating_framework == 'train_test_split':
                 y_pred = fitted_model.predict(X_val)
-                if prediction_type == "classification" or prediction_type == "nlp_classification":
+                if prediction_type == "classification":
                     y_pred_proba = fitted_model.predict_proba(X_val)
                 else:
                     y_pred_proba = None
@@ -409,7 +408,7 @@ class SeqTune:
                     batch_y = Y_val[0 + i:step + i]
 
                     y_pred = fitted_model.predict(batch_X)
-                    if prediction_type == "classification" or prediction_type == "nlp_classification":
+                    if prediction_type == "classification":
                         y_pred_proba = fitted_model.predict_proba(batch_X)
                     else:
                         y_pred_proba = None
@@ -442,7 +441,7 @@ class SeqTune:
                         X_train, Y_train)
 
                 y_pred = fitted_model.predict(X_val)
-                if prediction_type == "classification" or prediction_type == "nlp_classification":
+                if prediction_type == "classification":
                     y_pred_proba = y_pred_proba = fitted_model.predict_proba(X_val)
                 else:
                     y_pred_proba = None

@@ -3,7 +3,8 @@ from tensorflow.keras import datasets as keras_datasets
 import tensorflow_datasets as tfds
 import numpy as np
 import pandas as pd
-
+from DataHandling import Filing
+from SCHO.utils.nlp_helper import NLPEncoder
 # TODO: add normalizer
 
 class ToyDatasets:
@@ -113,11 +114,8 @@ class ToyDatasets:
 
         elif dataset_name == "cifar10":
             (x_train, y_train), (x_test, y_test) = keras_datasets.cifar10.load_data()
-            # undersampling_index = list(np.random.choice(len(x_train), 200, replace=False))
-            # x_train = x_train[undersampling_index, :]
             x_train = x_train / 255
             x_test = x_test / 255
-            # y_train = y_train[undersampling_index]
             if return_pre_split_tuple:
                 return x_train, y_train, x_test, y_test
             else:
@@ -202,16 +200,41 @@ class ToyDatasets:
                 return x_train, y_train
 
         elif dataset_name == "imdb":
-            raw_data = pd.read_csv(Filing.input_parent_folder_path + "/datasets/imdb/imdb_dataset.csv")
+            raw_data = pd.read_csv(Filing.input_parent_folder_path + "datasets_offline/imdb/imdb_dataset.csv")
             X = raw_data["review"].to_numpy()
             Y = raw_data["sentiment"].to_numpy()
             Y[Y == "negative"] = int(0)
             Y[Y == "positive"] = int(1)
+            Y = Y.astype('int')
 
-            # undersampling_index = list(np.random.choice(len(X), 25000, replace=False))
+            # # TODO: TOGGLE:
+            # undersampling_index = list(np.random.choice(len(X), 500, replace=False))
             # X = X[undersampling_index]
             # Y = Y[undersampling_index]
-            Y = Y.astype('int')
+
+            if return_pre_split_tuple:
+
+                np.random.seed(1234)
+                OOS_index = list(np.random.choice(len(X), round(len(X) * 0.2), replace=False)) #TODO: hard coded 20% OOS proportion
+                IS_index = list(np.setdiff1d(np.arange(len(X)), OOS_index))
+                try:
+                    x_test = X[OOS_index]
+                    y_test = Y[OOS_index]
+                    x_train = X[IS_index]
+                    y_train = Y[IS_index]
+                except:
+                    print("Value Error: X data must be a single column containing full string sentences per row.")
+
+                tfidf_vectorizer, tfidf_object = NLPEncoder.fit_BOW_vectorizer(X=x_train)
+                x_train = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object, X=x_train)
+                x_test = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object, X=x_test)
+
+                return x_train, y_train, x_test, y_test
+
+            else:
+                tfidf_vectorizer, tfidf_object = NLPEncoder.fit_BOW_vectorizer(X=X)
+                X = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object, X=X)
+
         return X, Y
 
     @staticmethod
@@ -266,3 +289,9 @@ class PreProcessingHelper:
                 X_final = np.hstack([X_final, X_append])
         X_final = X_final[:, 1:]
         return X_final
+
+
+
+
+
+
