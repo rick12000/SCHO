@@ -42,7 +42,8 @@ class Analytics:
                        "accuracy_score": ["mean", "max"],
                        "log_loss": ["mean", "min"],
                        "CI_breach": "mean"}
-        results_table = cross_model_log.groupby(["secondary_model", "cp_scorer"],
+        cross_model_log["confidence_level"] = cross_model_log["confidence_level"].fillna("N/A")
+        results_table = cross_model_log.groupby(["secondary_model", "cp_scorer", "confidence_level"],
                                                 as_index=False).agg(
             aggregation)
         results_table.columns = [''.join(col).strip() for col in results_table.columns.values]

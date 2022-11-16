@@ -233,21 +233,21 @@ class PlotHelper:
         plt.close()
 
     @staticmethod
-    def plot_performance_variance_breach_trifecta(logging_data, plot_over_time):
+    def plot_performance_variance_breach_trifecta(logging_data, filer, plot_over_time, accuracy_metric,
+                                                  plot_1_bounds=None, plot_2_bounds=None, plot_3_bounds=None):
         plt.clf()
         plt.figure(figsize=(17, 8))
         mycolorpalette = ['tab:pink', 'tab:purple', 'tab:red']
 
         logging_data["secondary_model_confidence_proxy"] = logging_data["secondary_model"].str.replace(" Predictor",
                                                                                                        "") + " " + (
-                                                                   logging_data["confidence_level"].astype(
+                                                                   (logging_data["confidence_level"].fillna(0)).astype(
                                                                        float) * 100).astype(int).astype(
             str) + "% Confidence"
         logging_data.loc[logging_data["secondary_model"] == "RS", ["secondary_model_confidence_proxy"]] = "RS"
 
         # PLOT 1:
         outcome_variable = "accuracy_score"
-        bounding_array = None
 
         plot_index = 1
         color_palette_index = 0
@@ -294,15 +294,14 @@ class PlotHelper:
             plt.xticks(fontsize=18)
             plt.yticks(fontsize=18)
 
-            if bounding_array is not None:
-                plt.ylim(bounding_array)
+            if plot_1_bounds is not None:
+                plt.ylim(plot_1_bounds)
 
             color_palette_index = color_palette_index + 1
 
         # PLOT 2:
         avg_aggregation = True
-        moving_average_window = 400
-        bounding_array = [-0.1, 0.35]  # 0.85]
+        moving_average_window = 30
 
         plot_index = 2
         color_palette_index = 0
@@ -340,17 +339,16 @@ class PlotHelper:
 
             plt.ylabel("Validation Accuracy: 400 Iteration Rolling Standard Deviation", fontsize=21)
 
-            plt.legend(loc="lower right", prop={'size': 19})
+            plt.legend(loc="upper right", prop={'size': 19})
             plt.xticks(fontsize=18)
             plt.yticks(fontsize=18)
 
-            if bounding_array is not None:
-                plt.ylim(bounding_array)
+            if plot_2_bounds is not None:
+                plt.ylim(plot_2_bounds)
 
             color_palette_index = color_palette_index + 1
 
         # PLOT 3:
-        bounding_array = [-0.1, 0.8]  # 0.65]
         outcome_variable = "CI_breach"
         logging_data = logging_data[logging_data["secondary_model"] != "RS"]
 
@@ -395,8 +393,8 @@ class PlotHelper:
             plt.xticks(fontsize=18)
             plt.yticks(fontsize=18)
 
-            if bounding_array is not None:
-                plt.ylim(bounding_array)
+            if plot_3_bounds is not None:
+                plt.ylim(plot_3_bounds)
 
             color_palette_index = color_palette_index + 1
 
@@ -410,3 +408,5 @@ class PlotHelper:
             plt.savefig(
                 filer.output_parent_folder_path + "/" + filer.dataset_name + "/" + filer.plots_folder_name + "/" + 'tri_confidence_chart.png',
                 dpi=my_dpi * 1.5)
+
+        plt.close()

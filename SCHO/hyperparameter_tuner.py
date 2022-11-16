@@ -626,7 +626,7 @@ class SeqTune:
                             primary_model_runtime=primary_model_RS_runtime_per_iter,
                             secondary_model_runtime=hyperreg_model_runtime_per_iter,
                             secondary_model_retraining_freq=conformal_retraining_frequency,
-                            secondary_model_runtime_as_frac_of_primary_model_runtime=1.5)
+                            secondary_model_runtime_as_frac_of_primary_model_runtime=1)
 
                         CP_quantile, hyperreg_model_runtime_per_iter_new = conformer.conformal_quantile(
                             confidence_level=confidence_level, n_of_param_combinations=runtime_optimized_combinations)
@@ -891,7 +891,7 @@ class OutlierRemover:
 
 def try_numeric(value):
     try:
-        if value % 1 == 0:
+        if float(value) % 1 == 0:
             return int(value)
         else:
             return float(value)
