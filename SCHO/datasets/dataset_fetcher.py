@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from DataHandling import Filing
 from SCHO.utils.nlp_helper import NLPEncoder
+
+
 # TODO: add normalizer
 
 class ToyDatasets:
@@ -141,20 +143,36 @@ class ToyDatasets:
             return X, Y
 
         elif dataset_name == "svhn":
-            svhn_raw_data = tfds.load("svhn_cropped", split='train')
-            images = []
-            labels = []
-            for i, image_dict in enumerate(tfds.as_numpy(svhn_raw_data)):
-                images.append(image_dict["image"])
-                labels.append(image_dict["label"])
-            # images = tf.image.resize(images, [32,32]).numpy()
+            if return_pre_split_tuple:
+                train_svhn_raw_data = tfds.load("svhn_cropped", split='train')
+                train_images = []
+                train_labels = []
+                for i, image_dict in enumerate(tfds.as_numpy(train_svhn_raw_data)):
+                    train_images.append(image_dict["image"])
+                    train_labels.append(image_dict["label"])
+                test_svhn_raw_data = tfds.load("svhn_cropped", split='test')
+                test_images = []
+                test_labels = []
+                for i, image_dict in enumerate(tfds.as_numpy(test_svhn_raw_data)):
+                    test_images.append(image_dict["image"])
+                    test_labels.append(image_dict["label"])
+                return np.array(train_images), np.array(train_labels), np.array(test_images), np.array(test_labels)
 
-            X = np.array(images)
-            Y = np.array(labels)
-            undersampling_index = list(np.random.choice(len(X), 30000, replace=False))
-            X = X[undersampling_index, :]
-            X = X / 255
-            Y = Y[undersampling_index]
+            else:
+                svhn_raw_data = tfds.load("svhn_cropped", split='train')
+                images = []
+                labels = []
+                for i, image_dict in enumerate(tfds.as_numpy(svhn_raw_data)):
+                    images.append(image_dict["image"])
+                    labels.append(image_dict["label"])
+                # images = tf.image.resize(images, [32,32]).numpy()
+
+                X = np.array(images)
+                Y = np.array(labels)
+                undersampling_index = list(np.random.choice(len(X), 25000, replace=False))
+                X = X[undersampling_index, :]
+                X = X / 255
+                Y = Y[undersampling_index]
 
             return X, Y
 
@@ -215,7 +233,8 @@ class ToyDatasets:
             if return_pre_split_tuple:
 
                 np.random.seed(1234)
-                OOS_index = list(np.random.choice(len(X), round(len(X) * 0.2), replace=False)) #TODO: hard coded 20% OOS proportion
+                OOS_index = list(
+                    np.random.choice(len(X), round(len(X) * 0.2), replace=False))  # TODO: hard coded 20% OOS proportion
                 IS_index = list(np.setdiff1d(np.arange(len(X)), OOS_index))
                 try:
                     x_test = X[OOS_index]
@@ -226,8 +245,10 @@ class ToyDatasets:
                     print("Value Error: X data must be a single column containing full string sentences per row.")
 
                 tfidf_vectorizer, tfidf_object = NLPEncoder.fit_BOW_vectorizer(X=x_train)
-                x_train = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object, X=x_train)
-                x_test = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object, X=x_test)
+                x_train = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object,
+                                                          X=x_train)
+                x_test = NLPEncoder.apply_BOW_vectorizer(vectorizer=tfidf_vectorizer, tfidf_object=tfidf_object,
+                                                         X=x_test)
 
                 return x_train, y_train, x_test, y_test
 
@@ -289,9 +310,3 @@ class PreProcessingHelper:
                 X_final = np.hstack([X_final, X_append])
         X_final = X_final[:, 1:]
         return X_final
-
-
-
-
-
-
