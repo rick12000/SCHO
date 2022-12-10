@@ -32,30 +32,22 @@ class Filing:
 class Analytics:
 
     @staticmethod
-    def summarize_cross_model_performance(cross_model_OOS_log, cross_model_IS_log):
-        cross_model_OOS_log["sample_category"] = "OOS"
-        cross_model_IS_log["sample_category"] = "IS"
-        cross_model_log = pd.concat([cross_model_OOS_log, cross_model_IS_log], axis=0)
+    def summarize_cross_model_performance(cross_model_IS_log):
+        cross_model_log = cross_model_IS_log.copy()
         cross_model_log = cross_model_log.drop(["loss_profile_dict"], axis=1)
         cross_model_log = cross_model_log.reset_index(drop=True)
 
-        aggregation = {"runtime": ["max", "count"], "accuracy": [Analytics.get_last, "mean"],
-                       "95_CI": Analytics.get_last,
+        aggregation = {"runtime": ["max", "count"],
+                       "accuracy": ["mean", "max", "min"],
+                       "accuracy_score": ["mean", "max"],
+                       "log_loss": ["mean", "min"],
                        "CI_breach": "mean"}
-        results_table = cross_model_log.groupby(["secondary_model", "cp_scorer", "sample_category"],
+        cross_model_log["confidence_level"] = cross_model_log["confidence_level"].fillna("N/A")
+        results_table = cross_model_log.groupby(["secondary_model", "cp_scorer", "confidence_level"],
                                                 as_index=False).agg(
             aggregation)
         results_table.columns = [''.join(col).strip() for col in results_table.columns.values]
         results_table["runtime_per_iter"] = results_table["runtimemax"] / results_table["runtimecount"]
-        adjunct_results_table = \
-            cross_model_log.iloc[
-            cross_model_log.groupby(["secondary_model", "cp_scorer", "sample_category"]).accuracy.idxmax().fillna(
-                0).values, :][
-                # fillna with 0 is not good, it only applies to when OOS is not selected as an option in train test split and this returns Nans for the OOS entries, replacing with 0 means arbitrarily selecting the 0th row instead of the idxmax for the OOS data, even though this hould correspond to Nan anyway which is fine
-                ["secondary_model", "cp_scorer", "sample_category", "accuracy", "95_CI"]]
-        adjunct_results_table = adjunct_results_table.rename(columns={"accuracy": "accuracymax", "95_CI": "95_CImax"})
-        results_table = pd.merge(results_table, adjunct_results_table, how='left',
-                                 on=["secondary_model", "cp_scorer", "sample_category"])
         results_table = results_table.drop(["runtimemax"], axis=1)
 
         return results_table

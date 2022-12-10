@@ -3,7 +3,7 @@ import unittest
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.neural_network import MLPClassifier
 
-from SCHO.HyperparameterRegressor import HyperRegCV, ConvNet
+from SCHO.hyperparameter_tuner import SeqTune, CNNClassifier
 
 
 class TestReproducibility(unittest.TestCase):
@@ -19,10 +19,10 @@ class TestReproducibility(unittest.TestCase):
         cls.min_train_iter = 30
         cls.max_iter = 50
 
-        X_tabular_test_data, y_tabular_test_data = HyperRegCV.get_toy_dataset("tabular_test_data")
-        X_convolutional_test_data, y_convolutional_test_data = HyperRegCV.get_toy_dataset("convolutional_test_data")
+        X_tabular_test_data, y_tabular_test_data = SeqTune.get_toy_dataset("tabular_test_data")
+        X_convolutional_test_data, y_convolutional_test_data = SeqTune.get_toy_dataset("convolutional_test_data")
 
-        tabular_initialized_model = HyperRegCV(model=MLPClassifier(), random_state=1234)
+        tabular_initialized_model = SeqTune(model=MLPClassifier(), random_state=1234)
         cls.tabular_OOS_HR_log, cls.tabular_IS_HR_log = tabular_initialized_model.fit(X=X_tabular_test_data,
                                                                                       min_training_iterations=cls.min_train_iter,
                                                                                       early_stop=cls.max_iter,
@@ -33,7 +33,7 @@ class TestReproducibility(unittest.TestCase):
             y=y_tabular_test_data,
             n_searches=cls.max_iter)
 
-        convolutional_initialized_model = HyperRegCV(model=ConvNet(), random_state=1234)
+        convolutional_initialized_model = SeqTune(model=CNNClassifier(), random_state=1234)
         cls.convolutional_OOS_HR_log, cls.convolutional_IS_HR_log = convolutional_initialized_model.fit(
             min_training_iterations=cls.min_train_iter,
             early_stop=cls.max_iter,
@@ -61,9 +61,9 @@ class TestReproducibility(unittest.TestCase):
         pass
 
     def test_large_tabular_iter(self):
-        X_tabular_test_data, y_tabular_test_data = HyperRegCV.get_toy_dataset("tabular_test_data")
+        X_tabular_test_data, y_tabular_test_data = SeqTune.get_toy_dataset("tabular_test_data")
 
-        tabular_initialized_model = HyperRegCV(model=MLPClassifier(), random_state=1234)
+        tabular_initialized_model = SeqTune(model=MLPClassifier(), random_state=1234)
         large_iter_tabular_OOS_HR_log, large_iter_tabular_IS_HR_log = tabular_initialized_model.fit(
             X=X_tabular_test_data,
             min_training_iterations=30,

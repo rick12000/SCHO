@@ -3,7 +3,8 @@ import random
 
 import numpy as np
 import pandas as pd
-from SCHO.utils.RunEfficiency import TimeLogger
+from SCHO.utils.runtime_eval import TimeLogger
+
 from sklearn import metrics
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.ensemble import RandomForestRegressor
@@ -351,8 +352,8 @@ class TuningHelper:
             combination):  # NOTE: assumes column names are sorted from layer 1 to layer N, otherwise will not create ordered list
         layer_tuple = ()
         for column_name in list(combination.index):
-            if "layer" in column_name.lower():
-                if combination[column_name] != 0:
+            if "layer_" in column_name.lower():
+                if int(combination[column_name]) != 0:
                     layer_tuple = layer_tuple + (int(combination[column_name]),)
         return layer_tuple
 
@@ -534,6 +535,13 @@ class TuningHelper:
             hyperparameter_tuple = hyperparameter_tuple[
                 ~(hyperparameter_tuple["adam"] + hyperparameter_tuple["sgd"] == 2)]
             hyperparameter_tuple = hyperparameter_tuple.drop(["solver"], axis=1)
+
+            for column in hyperparameter_tuple.columns:
+                if "layer" in column.lower() or (column in ["adam", "sgd"]):  # TODO: hard coded, fix, mak ebetter
+                    hyperparameter_tuple[column] = hyperparameter_tuple[column].astype(int)
+                else:
+                    hyperparameter_tuple[column] = hyperparameter_tuple[column].astype(float)
+
 
         elif "forest" in str(self.model).lower():
             if n_of_param_combinations is not None and n_of_param_combinations < TuningHelper.RANDOM_FOREST_DEFAULT_PARAMS:
