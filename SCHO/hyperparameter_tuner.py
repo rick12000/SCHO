@@ -29,7 +29,7 @@ from sklearn.preprocessing import StandardScaler
 from SCHO.conformal_methods import Conformal
 from SCHO.utils.runtime_eval import TimeLogger
 from SCHO.utils.runtime_eval import ConformalRuntimeOptimizer
-from SCHO.utils.nlp_helper import NLPEncoder
+from nlp_helper import NLPEncoder
 from SCHO.wrappers.keras_wrappers import CNNClassifier
 from sklearn.neural_network import MLPClassifier
 from tqdm import tqdm

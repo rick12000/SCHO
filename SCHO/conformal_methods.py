@@ -13,6 +13,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.linear_model import QuantileRegressor
 from sklearn.metrics import make_scorer
 from sklearn.metrics import mean_pinball_loss
+from sklearn.metrics import mean_absolute_error
 from sklearn.model_selection import GridSearchCV
 from sklearn.model_selection import KFold
 from sklearn.neighbors import KNeighborsRegressor
@@ -183,9 +184,11 @@ class Conformal:
             var_train = abs(np.array(self.y_train) - np.mean(np.array(self.y_train)))
             # var_model = RandomForestRegressor().fit(self.X_train, var_train)
             parameters = {'n_estimators': [10, 50, 100, 200]}
-            var_model = GridSearchCV(RandomForestRegressor(random_state=self.random_state), parameters)
+            var_model = GridSearchCV(RandomForestRegressor(random_state=self.random_state), parameters,
+                                     scoring=make_scorer(mean_absolute_error, greater_is_better=False))
             var_model.fit(self.X_train, var_train)
             self.var_model = var_model
+            # print(var_model.cv_results_)
 
             var_array = var_model.predict(self.X_obs)
             var_array = np.array([max(x, 0) for x in var_array])
@@ -210,12 +213,12 @@ class Conformal:
         if self.scoring == 'linear_cqr':
             parameters = {"alpha": [0, 0.001, 0.005, 0.01, 0.1]}
             quant_reg_lo = GridSearchCV(QuantileRegressor(quantile=0.05), parameters,
-                                        scoring=make_scorer(mean_pinball_loss, alpha=0.05))
+                                        scoring=make_scorer(mean_pinball_loss, greater_is_better=False, alpha=0.05))
             quant_reg_lo.fit(self.X_train, self.y_train)
             # quant_reg_lo = QuantileRegressor(quantile=(1 - confidence_level)).fit(self.X_train, self.y_train)
             self.quant_reg_lo = quant_reg_lo
             quant_reg_hi = GridSearchCV(QuantileRegressor(quantile=0.95), parameters,
-                                        scoring=make_scorer(mean_pinball_loss, alpha=0.95))
+                                        scoring=make_scorer(mean_pinball_loss, greater_is_better=False, alpha=0.95))
             quant_reg_hi.fit(self.X_train, self.y_train)
             # quant_reg_hi = QuantileRegressor(quantile=confidence_level).fit(self.X_train, self.y_train)
             self.quant_reg_hi = quant_reg_hi
@@ -229,7 +232,8 @@ class Conformal:
             parameters = {"learning_rate": [0.01, 0.05, 0.1, 0.5]}
             quant_reg_lo = GridSearchCV(GradientBoostingRegressor(loss="quantile", alpha=0.05,
                                                                   random_state=self.random_state),
-                                        param_grid=parameters, scoring=make_scorer(mean_pinball_loss, alpha=0.05))
+                                        param_grid=parameters,
+                                        scoring=make_scorer(mean_pinball_loss, greater_is_better=False, alpha=0.05))
             quant_reg_lo.fit(self.X_train, self.y_train)
             # quant_reg_lo = GradientBoostingRegressor(loss="quantile", alpha=(1 - confidence_level),
             #                                          random_state=self.random_state).fit(self.X_train,
@@ -237,8 +241,10 @@ class Conformal:
             self.quant_reg_lo = quant_reg_lo
             quant_reg_hi = GridSearchCV(GradientBoostingRegressor(loss="quantile", alpha=0.95,
                                                                   random_state=self.random_state),
-                                        param_grid=parameters, scoring=make_scorer(mean_pinball_loss, alpha=0.95))
+                                        param_grid=parameters,
+                                        scoring=make_scorer(mean_pinball_loss, greater_is_better=False, alpha=0.95))
             quant_reg_hi.fit(self.X_train, self.y_train)
+            # print(quant_reg_hi.cv_results_, quant_reg_lo.cv_results_)
             # quant_reg_hi = GradientBoostingRegressor(loss="quantile", alpha=(confidence_level),
             #                                          random_state=self.random_state).fit(
             #     self.X_train,
