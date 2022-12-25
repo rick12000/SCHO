@@ -101,6 +101,8 @@ class Conformal:
                     f"Best Achieved SCHO Point Estimator Accuracy: {hyperparameter_performance_record['accuracy'].min()}")
             optimal_idx = (hyperparameter_performance_record['accuracy']).argmin()
             optimal_parameters = hyperparameter_performance_record.iloc[optimal_idx, :]
+            print(hyperparameter_performance_record['accuracy'])
+            print(hyperparameter_performance_record['accuracy'][(hyperparameter_performance_record['accuracy']).argmin()])
 
             self.best_point_predictor_MSE = hyperparameter_performance_record['accuracy'].min()
 
@@ -442,7 +444,7 @@ class TuningHelper:
             solver_list = ['adam', 'sgd']
             learning_rate_list = [0.0001, 0.001, 0.01, 0.1]
             alpha_list = [0.0001, 0.001, 0.01, 0.1, 1, 3, 10]
-            layer_size = [2, 6, 8, 10, 12, 14, 16, 18, 20, 30, 40]
+            layer_size = [2, 6, 8, 10, 20, 30, 40,60]
             n_layers = [2, 3, 4]
             parameter_dict = {'solver': solver_list,
                               'learning_rate_init': learning_rate_list,
@@ -453,15 +455,15 @@ class TuningHelper:
         elif "forest" in str(self.model).lower():
             n_estimators = [10, 50, 100, 200, 400]
             max_features = [0.2, 0.4, 0.6, 0.8, 1]  # ['sqrt', 'log2', None]
-            min_samples_split = [2, 3, 5]
-            min_samples_leaf = [1, 2]
+            min_samples_split = [2, 3, 5, 10]
+            min_samples_leaf = [1, 2, 5]
             parameter_dict = {'n_estimators': n_estimators,
                               'max_features': max_features,
                               'min_samples_split': min_samples_split,
                               'min_samples_leaf': min_samples_leaf}
 
         elif "neigh" in str(self.model).lower():
-            n_neighbors = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            n_neighbors = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 50]
             parameter_dict = {'n_neighbors': n_neighbors}
 
         elif "svr" in str(self.model).lower():
