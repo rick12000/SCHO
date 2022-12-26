@@ -9,8 +9,8 @@ class ConformalRuntimeOptimizer:
                                                                      secondary_model_runtime_as_frac_of_primary_model_runtime):
         optimal_n_of_secondary_model_param_combinations = (
                 (primary_model_runtime * secondary_model_retraining_freq) / (
-                secondary_model_runtime * secondary_model_runtime_as_frac_of_primary_model_runtime))
-        optimal_n_of_secondary_model_param_combinations = int(round(optimal_n_of_secondary_model_param_combinations))
+                secondary_model_runtime * (1/secondary_model_runtime_as_frac_of_primary_model_runtime)))
+        optimal_n_of_secondary_model_param_combinations = max(1, int(round(optimal_n_of_secondary_model_param_combinations)))
 
         # print(f"Optimal Number of Hyperparameters to Test: {optimal_n_of_secondary_model_param_combinations}")
         return optimal_n_of_secondary_model_param_combinations
