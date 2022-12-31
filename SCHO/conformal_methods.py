@@ -59,6 +59,7 @@ class Conformal:
         self.point_estimator_best_hyperparameter_config = None
         self.variance_estimator_best_hyperparameter_config = None
         self.best_point_predictor_MSE = None
+        self.best_variance_estimator_MSE = None
 
     @staticmethod
     def nearest_neighbour_finder(input_point, point_space):
@@ -76,6 +77,7 @@ class Conformal:
                                 n_of_param_combinations=None, scoring="root_mean_squared_error",
                                 pinball_loss_alpha=None):
         if n_of_param_combinations is None or self.point_estimator_previous_best_hyperparameter_config is None or self.variance_estimator_previous_best_hyperparameter_config is None or n_of_param_combinations > 1:
+            hyperreg_model_runtime_log = TimeLogger()
             tuning_helper = TuningHelper(model=model, random_state=self.random_state,
                                          previous_best_hyperparameter_config=previous_best_hyperparameter_config)
             parameter_grid = tuning_helper.get_hyperreg_model_parameters()
@@ -85,7 +87,6 @@ class Conformal:
             hyperparameter_performance_record = tuning_helper.build_hyperreg_hyperparameter_logger(
                 hyperparameter_combinations=hyperparameter_tuple_ordered)
 
-            hyperreg_model_runtime_log = TimeLogger()
             parameter_row = 0
             for row in range(0, len(hyperparameter_tuple_ordered)):
                 combination = hyperparameter_tuple_ordered.iloc[row, :]
@@ -109,7 +110,11 @@ class Conformal:
             print(
                 hyperparameter_performance_record['accuracy'][(hyperparameter_performance_record['accuracy']).argmin()])
 
-            self.best_point_predictor_MSE = hyperparameter_performance_record['accuracy'].min()
+            if model_type == "point_estimator":
+                self.best_point_predictor_MSE = hyperparameter_performance_record['accuracy'].min()
+            else:
+                self.best_variance_estimator_MSE = hyperparameter_performance_record['accuracy'].min()
+
             if model_type == "point_estimator":
                 self.point_estimator_best_hyperparameter_config = optimal_parameters
             elif model_type == "variance_estimator":

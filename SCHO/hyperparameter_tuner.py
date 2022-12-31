@@ -552,7 +552,7 @@ class SeqTune:
                 if i == min_training_iterations:
                     total_primary_model_RS_runtime = primary_model_runtime_log.return_runtime()
                     primary_model_RS_runtime_per_iter = total_primary_model_RS_runtime / (min_training_iterations + 1)
-                    # print("THIS1:", primary_model_RS_runtime_per_iter)
+                    print("THIS1:", primary_model_RS_runtime_per_iter)
 
                 no_sample_idx.append(row)
 
@@ -625,12 +625,12 @@ class SeqTune:
                         CP_quantile, hyperreg_model_runtime_per_iter = conformer.conformal_quantile(
                             confidence_level=confidence_level)
                     else:
-                        # print("THIS2:", hyperreg_model_runtime_per_iter)
+                        print("THIS2:", hyperreg_model_runtime_per_iter)
                         runtime_optimized_combinations = ConformalRuntimeOptimizer.get_optimal_number_of_secondary_model_parameter_combinations(
                             primary_model_runtime=primary_model_RS_runtime_per_iter,
                             secondary_model_runtime=hyperreg_model_runtime_per_iter,
                             secondary_model_retraining_freq=conformal_retraining_frequency,
-                            secondary_model_runtime_as_frac_of_primary_model_runtime=0.25)
+                            secondary_model_runtime_as_frac_of_primary_model_runtime=0.5)
 
                         CP_quantile, hyperreg_model_runtime_per_iter_new = conformer.conformal_quantile(
                             confidence_level=confidence_level, n_of_param_combinations=runtime_optimized_combinations)
