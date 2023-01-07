@@ -29,7 +29,7 @@ from sklearn.preprocessing import StandardScaler
 from SCHO.conformal_methods import Conformal
 from SCHO.utils.runtime_eval import TimeLogger
 from SCHO.utils.runtime_eval import ConformalRuntimeOptimizer
-from SCHO.utils.nlp_helper import NLPEncoder
+from nlp_helper import NLPEncoder
 from SCHO.wrappers.keras_wrappers import CNNClassifier
 from sklearn.neural_network import MLPClassifier
 from tqdm import tqdm
@@ -552,6 +552,7 @@ class SeqTune:
                 if i == min_training_iterations:
                     total_primary_model_RS_runtime = primary_model_runtime_log.return_runtime()
                     primary_model_RS_runtime_per_iter = total_primary_model_RS_runtime / (min_training_iterations + 1)
+                    print("THIS1:", primary_model_RS_runtime_per_iter)
 
                 no_sample_idx.append(row)
 
@@ -604,10 +605,11 @@ class SeqTune:
                     #     hyperparameter_X_norm, hyperparameter_Y)
 
                     if i == min_training_iterations + 1:
-                        stored_best_hyperparameter_config = None
+                        point_estimator_stored_best_hyperparameter_config = None
+                        variance_estimator_stored_best_hyperparameter_config=None
 
-                    conformer = Conformal(model=hyper_reg_model,
-                                          scoring=CP_scorer,
+                    conformer = Conformal(point_estimator=hyper_reg_model,
+                                          variance_estimator=CP_scorer,
                                           X_obs=np.array(HR_X_OOS),
                                           y_obs=np.array(HR_y_OOS),
                                           X_train=np.array(HR_X_IS),
@@ -616,17 +618,19 @@ class SeqTune:
                                           y_obs_train=np.array(hyperparameter_Y),
                                           X_full=np.array(HR_X_space),
                                           random_state=self.random_state,
-                                          previous_best_hyperparameter_config=stored_best_hyperparameter_config)
+                                          point_estimator_previous_best_hyperparameter_config=point_estimator_stored_best_hyperparameter_config,
+                                          variance_estimator_previous_best_hyperparameter_config=variance_estimator_stored_best_hyperparameter_config)
 
                     if i == min_training_iterations + 1:
                         CP_quantile, hyperreg_model_runtime_per_iter = conformer.conformal_quantile(
                             confidence_level=confidence_level)
                     else:
+                        print("THIS2:", hyperreg_model_runtime_per_iter)
                         runtime_optimized_combinations = ConformalRuntimeOptimizer.get_optimal_number_of_secondary_model_parameter_combinations(
                             primary_model_runtime=primary_model_RS_runtime_per_iter,
                             secondary_model_runtime=hyperreg_model_runtime_per_iter,
                             secondary_model_retraining_freq=conformal_retraining_frequency,
-                            secondary_model_runtime_as_frac_of_primary_model_runtime=1)
+                            secondary_model_runtime_as_frac_of_primary_model_runtime=0.5)
 
                         CP_quantile, hyperreg_model_runtime_per_iter_new = conformer.conformal_quantile(
                             confidence_level=confidence_level, n_of_param_combinations=runtime_optimized_combinations)
@@ -637,7 +641,8 @@ class SeqTune:
                     baseline_accuracies, CP_intervals, CP_bounds = conformer.generate_confidence_intervals(
                         conformal_quantile=CP_quantile)
 
-                    stored_best_hyperparameter_config = conformer.best_hyperparameter_config
+                    point_estimator_stored_best_hyperparameter_config = conformer.point_estimator_best_hyperparameter_config
+                    variance_estimator_stored_best_hyperparameter_config = conformer.variance_estimator_best_hyperparameter_config
                     # if "forest" in str(hyper_reg_model).lower():
                     #     PlotHelper.plot_sorted_conformal_variance(baseline_accuracies=baseline_accuracies,
                     #                                               CP_intervals=CP_intervals,

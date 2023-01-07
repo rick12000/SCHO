@@ -4,7 +4,7 @@ import tensorflow_datasets as tfds
 import numpy as np
 import pandas as pd
 from DataHandling import Filing
-from SCHO.utils.nlp_helper import NLPEncoder
+from nlp_helper import NLPEncoder
 
 
 # TODO: add normalizer
