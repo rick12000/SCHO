@@ -24,7 +24,7 @@ class ToyDatasets:
             Y = np.where(pd.Series(Y).astype(str).str.contains("normal"), "normal", "attack")
             Y = pd.factorize(Y)[0]
             XY = pd.DataFrame(np.hstack([X, Y.reshape(len(Y), 1)])).drop_duplicates()
-            XY = ClassRebalancer._binary_class_rebalancing(data=XY, y_name=(XY.shape[1] - 1))
+            XY = ToyDatasets._binary_class_rebalancing(data=XY, y_name=(XY.shape[1] - 1))
             X = XY.drop([(XY.shape[1] - 1)], axis=1).to_numpy()
             X = PreProcessingHelper.one_hot_encode_variables(X)
             Y = XY[XY.shape[1] - 1].to_numpy().astype(int)
@@ -40,10 +40,10 @@ class ToyDatasets:
             Y = toy_dataset.target
 
         elif dataset_name == "friedman1":
-            X, Y = sklearn_datasets.make_friedman1(n_samples=2000, n_features=15, random_state=10)
+            X, Y = sklearn_datasets.make_friedman1(n_samples=20000, n_features=15, random_state=10)
 
         elif dataset_name == "census":
-            raw_data = pd.read_csv(Filing.input_parent_folder_path + "/datasets/census/census.data", sep=',')
+            raw_data = pd.read_csv("datasets_offline/census/census.data", sep=',')
             raw_data_formatted = pd.DataFrame()
             for l in range(0, raw_data.shape[1]):
                 try:
@@ -52,7 +52,7 @@ class ToyDatasets:
                     raw_data_formatted = pd.concat([raw_data_formatted, pd.get_dummies(raw_data.iloc[:, l])], axis=1)
             raw_data_formatted = raw_data_formatted.drop([" <=50K"], axis=1).reset_index(drop=True)
 
-            raw_data_formatted = ClassRebalancer._binary_class_rebalancing(data=raw_data_formatted, y_name=" >50K")
+            raw_data_formatted = ToyDatasets._binary_class_rebalancing(data=raw_data_formatted, y_name=" >50K")
             X = (raw_data_formatted.drop([" >50K"], axis=1)).to_numpy()
             Y = raw_data_formatted[" >50K"].to_numpy()
             Y = Y.astype('int')

@@ -32,8 +32,9 @@ from SCHO.utils.runtime_eval import ConformalRuntimeOptimizer
 from nlp_helper import NLPEncoder
 from SCHO.wrappers.keras_wrappers import CNNClassifier
 from sklearn.neural_network import MLPClassifier
+from sklearn.neural_network import MLPRegressor
 from tqdm import tqdm
-
+from multiprocessing import Pool
 
 
 class SeqTune:
@@ -292,19 +293,20 @@ class SeqTune:
             direction = 'inverse'
         return direction
 
-    def build_hyperparameter_logger(self, hyperparameter_combinations):
+    def build_hyperparameter_logger(self, hyperparameter_combinations, stripped=False):
 
         hyperparameter_performance_record_df = hyperparameter_combinations.copy()
         for i in range(0, hyperparameter_performance_record_df.shape[1]):
             hyperparameter_performance_record_df.iloc[:, i] = np.nan
         hyperparameter_performance_record_df["accuracy"] = np.nan
-        hyperparameter_performance_record_df["accuracy_score"] = np.nan
-        hyperparameter_performance_record_df["log_loss"] = np.nan
-        hyperparameter_performance_record_df["variance"] = np.nan
-        hyperparameter_performance_record_df["runtime"] = np.nan
-        hyperparameter_performance_record_df["CI_breach"] = np.nan
-        hyperparameter_performance_record_df["point_predictor_MSE"] = np.nan
-        hyperparameter_performance_record_df["loss_profile_dict"] = np.nan
+        if not stripped:
+            hyperparameter_performance_record_df["accuracy_score"] = np.nan
+            hyperparameter_performance_record_df["log_loss"] = np.nan
+            hyperparameter_performance_record_df["variance"] = np.nan
+            hyperparameter_performance_record_df["runtime"] = np.nan
+            hyperparameter_performance_record_df["CI_breach"] = np.nan
+            hyperparameter_performance_record_df["point_predictor_MSE"] = np.nan
+            hyperparameter_performance_record_df["loss_profile_dict"] = np.nan
 
         return hyperparameter_performance_record_df
 
@@ -465,6 +467,25 @@ class SeqTune:
 
         return final_loss, final_variance, loss_direction, loss_profile
 
+    @staticmethod
+    def get_batch_number(prediction_type, y):
+        if prediction_type == "regression":
+            desired_batch_size = 60
+        elif prediction_type == "classification":
+            desired_batch_size = 30 * len(np.unique(np.array(y)))
+        batch_number = int(math.floor(len(y) / desired_batch_size))
+        return batch_number
+
+    @staticmethod
+    def get_batches(X, y, batch_number):
+        X_batch_list = []
+        y_batch_list = []
+        for i in range(0, len(X), math.floor(len(X) / batch_number)):
+            X_batch_list.append(X[0 + i:math.floor(len(X) / batch_number) + i,
+                                :])  # TODO: sort out the indexes better than floor here and in other method
+            y_batch_list.append(y[0 + i:math.floor(len(y) / batch_number) + i])
+        return X_batch_list, y_batch_list
+
     def fit(self,
             X,
             y,
@@ -482,6 +503,7 @@ class SeqTune:
             conformal_retraining_frequency=5,
             prediction_type="classification",
             presplit_X_y_data_tuple=None,
+            enforced_batch_number=30,
             verbose=False):
         if custom_loss_function is None:
             if prediction_type == "regression":
@@ -504,210 +526,199 @@ class SeqTune:
         start_time = time.time()
         blacklisted_combination_df = np.array([])
         no_sample_idx = []
-        for row in range(0, len(hyperparameter_tuple_ordered)):
 
-            combination = hyperparameter_tuple_ordered.iloc[row, :]
-            # TODO: IMPORTANT TO ID ALSO FOR THE RANDOM SEARCH FIT METHOD
-            if i <= min_training_iterations:
-                if verbose:
-                    print(combination)
+        for row in range(0, len(hyperparameter_tuple_ordered)):
+            if i == 0:
+                primary_model_runtime_log = TimeLogger()
+            else:
+                primary_model_runtime_log.resume_runtime()
+
+            if enforced_batch_number == None:
+                batch_n = SeqTune.get_batch_number(prediction_type=prediction_type, y=y)
+            else:
+                batch_n = enforced_batch_number
+            X_batches, y_batches = SeqTune.get_batches(X=X, y=y, batch_number=batch_n)
+            if (i == 0) or (
+                    i - last_retraining_iteration_counter >= conformal_retraining_frequency):
+                if i == 0:
+                    batch_combinations = hyperparameter_tuple_ordered.sample(n=batch_n,
+                                                                             random_state=self.random_state).reset_index(
+                        drop=True)
+                else:
+                    batch_combinations = next_batch_combinations.copy()
+                batch_performance_record = self.build_hyperparameter_logger(
+                    hyperparameter_combinations=batch_combinations, stripped=True)
+                print("Running batch search...")
+                for batch_index in tqdm(range(0, len(batch_combinations))):
+                    X_batch = X_batches[batch_index]
+                    y_batch = y_batches[batch_index]
+                    validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
+                        combination=batch_combinations.iloc[batch_index, :], X_IS=X_batch, y_IS=y_batch,
+                        custom_loss_function=custom_loss_function,
+                        prediction_type=prediction_type,
+                        validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes)
+                    logged_batch_combination = batch_combinations.iloc[batch_index, :]
+                    logged_batch_combination['accuracy'] = validation_loss
+                    batch_performance_record.iloc[batch_index, :] = logged_batch_combination.copy()
+                print(batch_performance_record["accuracy"].max())
+
+                primary_model_RS_runtime_per_iter = 2  # TODO, come back and fix properly, reintigrate counter
+
+                # if i == min_training_iterations:
+                #     total_primary_model_RS_runtime = primary_model_runtime_log.return_runtime()
+                #     primary_model_RS_runtime_per_iter = total_primary_model_RS_runtime / (min_training_iterations + 1)
+                #     print("THIS1:", primary_model_RS_runtime_per_iter)
+
+                # no_sample_idx.append(row)
+
+                # if verbose:
+                #     print(
+                #         f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
+
+            batch_performance_record_cached = batch_performance_record.copy()
+            batch_performance_record_cached_clean = batch_performance_record_cached.dropna(
+                subset=[
+                    "accuracy"])  # TODO: this is just a workaround for when convnet throws np nan loss, because the config of the network was too complex or odd and it made nan predictions
+
+            hyperparameter_X = batch_performance_record_cached_clean.drop(
+                ["accuracy"],
+                axis=1)
+            hyperparameter_Y = batch_performance_record_cached_clean["accuracy"]
+            if len(hyperparameter_X) < 50:
+                hyperreg_OOS_split = 5 / len(hyperparameter_X)
+            else:
+                hyperreg_OOS_split = 20 / len(hyperparameter_X)
+
+            # TODO: TOGGLE ON AND OFF OUTLIER REMOVAL
+            if custom_loss_function == "log_loss":  # or prediction_type == "regression" or
+                outlier_remover = OutlierRemover(method="y_IQR")
+                outlier_remover.fit_outlier_remover(X=np.array(hyperparameter_X), y=np.array(hyperparameter_Y))
+                hyperparameter_X, hyperparameter_Y = outlier_remover.apply_outlier_remover(
+                    X=np.array(hyperparameter_X), y=np.array(hyperparameter_Y))
+
+            HR_X_OOS, HR_y_OOS, HR_X_IS, HR_y_IS = SeqTune.train_val_test_split(X=np.array(hyperparameter_X),
+                                                                                y=np.array(hyperparameter_Y),
+                                                                                OOS_split=hyperreg_OOS_split,
+                                                                                normalize=False,
+                                                                                random_state=self.random_state)
+
+            if (i == 0) or (
+                    i - last_retraining_iteration_counter >= conformal_retraining_frequency):
+                scaler = StandardScaler()
+                scaler.fit(HR_X_IS)
+                HR_X_space = scaler.transform(hyperparameter_tuple_ordered.to_numpy())
+                HR_X_IS = scaler.transform(HR_X_IS)
+                HR_X_OOS = scaler.transform(HR_X_OOS)
+                hyperparameter_X_norm = scaler.transform(
+                    hyperparameter_X)  # TODO: for this one if you're using it and retraining on the whole dataset then must use the whole datset as the scaler.fit earlier in code
 
                 if i == 0:
-                    primary_model_runtime_log = TimeLogger()
+                    point_estimator_stored_best_hyperparameter_config = None
+                    variance_estimator_stored_best_hyperparameter_config = None
+
+                conformer = Conformal(point_estimator=hyper_reg_model,
+                                      variance_estimator=CP_scorer,
+                                      X_obs=np.array(HR_X_OOS),
+                                      y_obs=np.array(HR_y_OOS),
+                                      X_train=np.array(HR_X_IS),
+                                      y_train=np.array(HR_y_IS),
+                                      X_obs_train=np.array(hyperparameter_X_norm),
+                                      y_obs_train=np.array(hyperparameter_Y),
+                                      X_full=np.array(HR_X_space),
+                                      random_state=self.random_state,
+                                      point_estimator_previous_best_hyperparameter_config=point_estimator_stored_best_hyperparameter_config,
+                                      variance_estimator_previous_best_hyperparameter_config=variance_estimator_stored_best_hyperparameter_config)
+
+                if i == 0:
+                    CP_quantile, hyperreg_model_runtime_per_iter = conformer.conformal_quantile(
+                        confidence_level=confidence_level)
                 else:
-                    primary_model_runtime_log.resume_runtime()
+                    runtime_optimized_combinations = ConformalRuntimeOptimizer.get_optimal_number_of_secondary_model_parameter_combinations(
+                        primary_model_runtime=primary_model_RS_runtime_per_iter,
+                        secondary_model_runtime=hyperreg_model_runtime_per_iter,
+                        secondary_model_retraining_freq=conformal_retraining_frequency,
+                        secondary_model_runtime_as_frac_of_primary_model_runtime=0.5)
 
-                validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
-                    combination=combination, X_IS=X, y_IS=y, custom_loss_function=custom_loss_function,
-                    prediction_type=prediction_type,
-                    validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes,
-                    presplit_X_y_data_tuple=presplit_X_y_data_tuple)
+                    CP_quantile, hyperreg_model_runtime_per_iter_new = conformer.conformal_quantile(
+                        confidence_level=confidence_level, n_of_param_combinations=runtime_optimized_combinations)
 
-                if np.isnan(validation_loss):
-                    blacklisted_combination_df = np.append(blacklisted_combination_df, combination)
-                    no_sample_idx.append(row)
-                    continue
-                elif isinstance(hyperparameter_performance_record["accuracy"].median(), int) or isinstance(
-                        hyperparameter_performance_record["accuracy"].median(), float):
-                    if prediction_type == "regression" and abs(validation_loss) > abs(
-                            np.median(y)) * 3:
-                        blacklisted_combination_df = np.append(blacklisted_combination_df, combination)
-                        no_sample_idx.append(row)
-                        continue
+                    if hyperreg_model_runtime_per_iter_new is not None:
+                        hyperreg_model_runtime_per_iter = hyperreg_model_runtime_per_iter_new
 
-                logged_combination = combination.copy()
-                logged_combination['accuracy'] = validation_loss
-                logged_combination['accuracy_score'] = validation_loss_profile["accuracy_score"]
-                logged_combination['log_loss'] = validation_loss_profile["log_loss"]
-                logged_combination['variance'] = validation_variance
+                baseline_accuracies, CP_intervals, CP_bounds = conformer.generate_confidence_intervals(
+                    conformal_quantile=CP_quantile)
 
-                log_time = time.time()
-                log_elapse = log_time - start_time
-                logged_combination['runtime'] = log_elapse
-                logged_combination['CI_breach'] = np.nan
-                logged_combination['point_predictor_MSE'] = np.nan
-                logged_combination['loss_profile_dict'] = validation_loss_profile
-                hyperparameter_performance_record.iloc[i, :] = logged_combination
-                primary_model_runtime_log.pause_runtime()
-                if i == min_training_iterations:
-                    total_primary_model_RS_runtime = primary_model_runtime_log.return_runtime()
-                    primary_model_RS_runtime_per_iter = total_primary_model_RS_runtime / (min_training_iterations + 1)
-                    print("THIS1:", primary_model_RS_runtime_per_iter)
-
-                no_sample_idx.append(row)
-
-                if verbose:
-                    print(
-                        f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
-
-            elif i > min_training_iterations:
-                hyperparameter_performance_record_cached = hyperparameter_performance_record.iloc[:i, :]
-                hyperparameter_performance_record_cached_clean = hyperparameter_performance_record_cached.dropna(
-                    subset=[
-                        "accuracy"])  # TODO: this is just a workaround for when convnet throws np nan loss, because the config of the network was too complex or odd and it made nan predictions
-
-                hyperparameter_X = hyperparameter_performance_record_cached_clean.drop(
-                    ["accuracy", "accuracy_score", "log_loss", "variance", "runtime", "CI_breach",
-                     "point_predictor_MSE", "loss_profile_dict"],
-                    axis=1)
-                hyperparameter_Y = hyperparameter_performance_record_cached_clean["accuracy"]
-                if len(hyperparameter_X) < 50:
-                    hyperreg_OOS_split = 5 / len(hyperparameter_X)
-                else:
-                    hyperreg_OOS_split = 20 / len(hyperparameter_X)
-
-                # TODO: TOGGLE ON AND OFF OUTLIER REMOVAL
-                if custom_loss_function == "log_loss":  # or prediction_type == "regression" or
-                    outlier_remover = OutlierRemover(method="y_IQR")
-                    outlier_remover.fit_outlier_remover(X=np.array(hyperparameter_X), y=np.array(hyperparameter_Y))
-                    hyperparameter_X, hyperparameter_Y = outlier_remover.apply_outlier_remover(
-                        X=np.array(hyperparameter_X), y=np.array(hyperparameter_Y))
-
-                HR_X_OOS, HR_y_OOS, HR_X_IS, HR_y_IS = SeqTune.train_val_test_split(X=np.array(hyperparameter_X),
-                                                                                    y=np.array(hyperparameter_Y),
-                                                                                    OOS_split=hyperreg_OOS_split,
-                                                                                    normalize=False,
-                                                                                    random_state=self.random_state)
-
-                if (i == min_training_iterations + 1) or (
-                        i - last_retraining_iteration_counter >= conformal_retraining_frequency):
-                    scaler = StandardScaler()
-                    scaler.fit(HR_X_IS)
-                    HR_X_space = scaler.transform(hyperparameter_tuple_ordered.to_numpy())
-                    HR_X_IS = scaler.transform(HR_X_IS)
-                    HR_X_OOS = scaler.transform(HR_X_OOS)
-                    hyperparameter_X_norm = scaler.transform(
-                        hyperparameter_X)  # TODO: for this one if you're using it and retraining on the whole dataset then must use the whole datset as the scaler.fit earlier in code
-
-                    # HR_CP_fitted_model = hyper_reg_model.fit(
-                    #     HR_X_IS, HR_y_IS)
-                    # HR_fitted_model = hyper_reg_model.fit(
-                    #     hyperparameter_X_norm, hyperparameter_Y)
-
-                    if i == min_training_iterations + 1:
-                        point_estimator_stored_best_hyperparameter_config = None
-                        variance_estimator_stored_best_hyperparameter_config=None
-
-                    conformer = Conformal(point_estimator=hyper_reg_model,
-                                          variance_estimator=CP_scorer,
-                                          X_obs=np.array(HR_X_OOS),
-                                          y_obs=np.array(HR_y_OOS),
-                                          X_train=np.array(HR_X_IS),
-                                          y_train=np.array(HR_y_IS),
-                                          X_obs_train=np.array(hyperparameter_X_norm),
-                                          y_obs_train=np.array(hyperparameter_Y),
-                                          X_full=np.array(HR_X_space),
-                                          random_state=self.random_state,
-                                          point_estimator_previous_best_hyperparameter_config=point_estimator_stored_best_hyperparameter_config,
-                                          variance_estimator_previous_best_hyperparameter_config=variance_estimator_stored_best_hyperparameter_config)
-
-                    if i == min_training_iterations + 1:
-                        CP_quantile, hyperreg_model_runtime_per_iter = conformer.conformal_quantile(
-                            confidence_level=confidence_level)
-                    else:
-                        print("THIS2:", hyperreg_model_runtime_per_iter)
-                        runtime_optimized_combinations = ConformalRuntimeOptimizer.get_optimal_number_of_secondary_model_parameter_combinations(
-                            primary_model_runtime=primary_model_RS_runtime_per_iter,
-                            secondary_model_runtime=hyperreg_model_runtime_per_iter,
-                            secondary_model_retraining_freq=conformal_retraining_frequency,
-                            secondary_model_runtime_as_frac_of_primary_model_runtime=0.5)
-
-                        CP_quantile, hyperreg_model_runtime_per_iter_new = conformer.conformal_quantile(
-                            confidence_level=confidence_level, n_of_param_combinations=runtime_optimized_combinations)
-
-                        if hyperreg_model_runtime_per_iter_new is not None:
-                            hyperreg_model_runtime_per_iter = hyperreg_model_runtime_per_iter_new
-
-                    baseline_accuracies, CP_intervals, CP_bounds = conformer.generate_confidence_intervals(
-                        conformal_quantile=CP_quantile)
-
-                    point_estimator_stored_best_hyperparameter_config = conformer.point_estimator_best_hyperparameter_config
-                    variance_estimator_stored_best_hyperparameter_config = conformer.variance_estimator_best_hyperparameter_config
-                    # if "forest" in str(hyper_reg_model).lower():
-                    #     PlotHelper.plot_sorted_conformal_variance(baseline_accuracies=baseline_accuracies,
-                    #                                               CP_intervals=CP_intervals,
-                    #                                               CP_scorer=CP_scorer,
-                    #                                               hyper_reg_model=hyper_reg_model,
-                    #                                               confidence_level=confidence_level)
-
-                    if loss_direction == 'direct':
-                        CP_bound = CP_bounds["max_bound"].to_numpy()
-                    elif loss_direction == 'inverse':
-                        CP_bound = CP_bounds["min_bound"].to_numpy()
-
-                    last_retraining_iteration_counter = i
+                point_estimator_stored_best_hyperparameter_config = conformer.point_estimator_best_hyperparameter_config
+                variance_estimator_stored_best_hyperparameter_config = conformer.variance_estimator_best_hyperparameter_config
+                # if "forest" in str(hyper_reg_model).lower():
+                #     PlotHelper.plot_sorted_conformal_variance(baseline_accuracies=baseline_accuracies,
+                #                                               CP_intervals=CP_intervals,
+                #                                               CP_scorer=CP_scorer,
+                #                                               hyper_reg_model=hyper_reg_model,
+                #                                               confidence_level=confidence_level)
 
                 if loss_direction == 'direct':
-                    if no_sample_idx != []:
-                        CP_bound[no_sample_idx] = -10000000
-                    maximal_idx = np.argmax(CP_bound)
-                    no_sample_idx.append(maximal_idx)
+                    CP_bound = CP_bounds["max_bound"].to_numpy()
                 elif loss_direction == 'inverse':
-                    if no_sample_idx != []:
-                        CP_bound[no_sample_idx] = 10000000
-                    maximal_idx = np.argmin(CP_bound)
-                    no_sample_idx.append(maximal_idx)
+                    CP_bound = CP_bounds["min_bound"].to_numpy()
 
-                maximal_parameter = hyperparameter_tuple_ordered.reset_index(drop=True).iloc[maximal_idx,
-                                    :]  # NOTE: using the non normalized one now because i need to feed rael parmeters later to the base model
+                last_retraining_iteration_counter = i
 
-                validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
-                    combination=maximal_parameter, X_IS=X, y_IS=y, custom_loss_function=custom_loss_function,
-                    prediction_type=prediction_type,
-                    validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes,
-                    presplit_X_y_data_tuple=presplit_X_y_data_tuple)
+            if loss_direction == 'direct':
+                if no_sample_idx != []:
+                    CP_bound[no_sample_idx] = -10000000
+                maximal_idx = np.argmax(CP_bound)
+                top_n_idx = np.argpartition(CP_bound, -batch_n)[-batch_n:]
+                no_sample_idx.append(maximal_idx)
+            elif loss_direction == 'inverse':
+                if no_sample_idx != []:
+                    CP_bound[no_sample_idx] = 10000000
+                maximal_idx = np.argmin(CP_bound)
+                top_n_idx = np.argpartition(CP_bound, batch_n)[:batch_n]
+                no_sample_idx.append(maximal_idx)
 
-                if np.isnan(validation_loss) or (prediction_type == "regression" and abs(validation_loss) > abs(
-                        np.median(y_raw)) * 3):
-                    blacklisted_combination_df = np.append(blacklisted_combination_df, maximal_parameter)
-                    # NOTE: here we don't append to no_sample_idx because it's already been appended previously in the maximal_idx section above
-                    continue
+            maximal_parameter = hyperparameter_tuple_ordered.reset_index(drop=True).iloc[maximal_idx,
+                                :]  # NOTE: using the non normalized one now because i need to feed rael parmeters later to the base model
+            next_batch_combinations = hyperparameter_tuple_ordered.reset_index(drop=True).iloc[top_n_idx,
+                                      :]  # NOTE: using the non normalized one now because i need to feed rael parmeters later to the base model
 
-                # print("IS primary model loss: ", validation_loss)
+            validation_loss, validation_variance, loss_direction, validation_loss_profile = self._get_validation_loss(
+                combination=maximal_parameter, X_IS=X, y_IS=y, custom_loss_function=custom_loss_function,
+                prediction_type=prediction_type,
+                validating_framework=validating_framework, train_val_split=train_val_split, n_classes=n_classes,
+                presplit_X_y_data_tuple=presplit_X_y_data_tuple)
 
-                maximal_parameter_logged = maximal_parameter.copy()
-                maximal_parameter_logged['accuracy'] = validation_loss
-                maximal_parameter_logged['accuracy_score'] = validation_loss_profile["accuracy_score"]
-                maximal_parameter_logged['log_loss'] = validation_loss_profile["log_loss"]
-                maximal_parameter_logged['variance'] = validation_variance
+            if np.isnan(validation_loss) or (prediction_type == "regression" and abs(validation_loss) > abs(
+                    np.median(y)) * 3):
+                blacklisted_combination_df = np.append(blacklisted_combination_df, maximal_parameter)
+                # NOTE: here we don't append to no_sample_idx because it's already been appended previously in the maximal_idx section above
+                continue
 
-                log_time = time.time()
-                log_elapse = log_time - start_time
-                maximal_parameter_logged['runtime'] = log_elapse
-                if (maximal_parameter_logged['accuracy'] > CP_bounds["max_bound"].to_numpy()[maximal_idx]) or (
-                        maximal_parameter_logged['accuracy'] < CP_bounds["min_bound"].to_numpy()[maximal_idx]):
-                    maximal_parameter_logged['CI_breach'] = 1
-                else:
-                    maximal_parameter_logged['CI_breach'] = 0
-                maximal_parameter_logged['point_predictor_MSE'] = conformer.best_point_predictor_MSE
-                maximal_parameter_logged['loss_profile_dict'] = validation_loss_profile
-                hyperparameter_performance_record.iloc[i, :] = maximal_parameter_logged
-                # At each inner loop, predict on OOS using optimal parameters
-                # for plot of optimal performance over number of iterations
+            # print("IS primary model loss: ", validation_loss)
 
-                if verbose:
-                    print(
-                        f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
+            maximal_parameter_logged = maximal_parameter.copy()
+            maximal_parameter_logged['accuracy'] = validation_loss
+            maximal_parameter_logged['accuracy_score'] = validation_loss_profile["accuracy_score"]
+            maximal_parameter_logged['log_loss'] = validation_loss_profile["log_loss"]
+            maximal_parameter_logged['variance'] = validation_variance
+
+            log_time = time.time()
+            log_elapse = log_time - start_time
+            maximal_parameter_logged['runtime'] = log_elapse
+            if (maximal_parameter_logged['accuracy'] > CP_bounds["max_bound"].to_numpy()[maximal_idx]) or (
+                    maximal_parameter_logged['accuracy'] < CP_bounds["min_bound"].to_numpy()[maximal_idx]):
+                maximal_parameter_logged['CI_breach'] = 1
+            else:
+                maximal_parameter_logged['CI_breach'] = 0
+            maximal_parameter_logged['point_predictor_MSE'] = conformer.best_point_predictor_MSE
+            maximal_parameter_logged['loss_profile_dict'] = validation_loss_profile
+            hyperparameter_performance_record.iloc[i, :] = maximal_parameter_logged
+            # At each inner loop, predict on OOS using optimal parameters
+            # for plot of optimal performance over number of iterations
+
+            if verbose:
+                print(
+                    f"Iteration: {i} | Time Elapsed: {log_elapse} | Validation Loss: {validation_loss} | Validation Accuracy: {validation_loss_profile['accuracy_score']}")
 
             # set tolerance:
             if i > (min_training_iterations + tolerance) and (
@@ -786,7 +797,7 @@ class SeqTune:
             elif isinstance(hyperparameter_performance_record["accuracy"].median(), int) or isinstance(
                     hyperparameter_performance_record["accuracy"].median(), float):
                 if prediction_type == "regression" and abs(validation_loss) > abs(
-                        np.median(y_raw)) * 3:
+                        np.median(y)) * 3:
                     continue
 
             logged_combination = combination.copy()
@@ -891,7 +902,6 @@ class OutlierRemover:
             y_outlier_cleaned = y[idx_keep]
 
         return X_outlier_cleaned, y_outlier_cleaned
-
 
 
 def try_numeric(value):
